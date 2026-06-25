@@ -1,0 +1,10 @@
+.git*
+.vscode
+local.settings.json
+test
+tests
+*.test.ts
+src
+infra
+.github
+node_modules

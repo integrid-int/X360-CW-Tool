@@ -1,0 +1,9 @@
+name: cw-shim
+services:
+  api:
+    project: .
+    language: ts
+    host: function
+infra:
+  provider: bicep
+  path: infra
