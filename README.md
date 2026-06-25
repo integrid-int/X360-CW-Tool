@@ -10,10 +10,7 @@ building the Axcient → Halo PSA middleware.
 
 ### Option 1 — One-click (push to GitHub first)
 
-> **Before clicking:** push this repo to GitHub, then replace `{YOU}` and `{REPO}`
-> in the URL below with your GitHub username and repo name.
-
-[![Deploy to Azure](https://aka.ms/deploytoazure)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2F{YOU}%2F{REPO}%2Fmain%2Fazuredeploy.json)
+[![Deploy to Azure](https://aka.ms/deploytoazure)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fintegrid-int%2FX360-CW-Tool%2Fmain%2Fazuredeploy.json)
 
 This creates all Azure infrastructure (Function App, Storage, App Insights,
 Log Analytics) in about 2 minutes. Then deploy the code:
