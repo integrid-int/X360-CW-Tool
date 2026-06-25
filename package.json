@@ -1,18 +1,18 @@
 {
   "name": "cw-shim",
   "version": "1.0.0",
-  "description": "ConnectWise API shim — logs x360Recover calls, returns mock CW responses",
+  "description": "ConnectWise API shim for x360Recover",
   "scripts": {
     "build": "tsc",
-    "start": "func start",
-    "prestart": "npm run build"
+    "watch": "tsc -w",
+    "prestart": "npm run build",
+    "start": "func start"
   },
   "dependencies": {
-    "@azure/functions": "^4.0.0"
+    "@azure/functions": "^4.5.0"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
-    "typescript": "^5.0.0",
-    "azure-functions-core-tools": "^4.0.0"
+    "@types/node": "^22.0.0",
+    "typescript": "^5.0.0"
   }
 }

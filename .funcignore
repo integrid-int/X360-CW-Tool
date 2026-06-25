@@ -1,0 +1,9 @@
+.git*
+.vscode
+local.settings.json
+src
+infra
+.github
+*.ts
+tsconfig.json
+node_modules/.bin

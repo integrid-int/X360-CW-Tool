@@ -2,17 +2,17 @@
   "version": "2.0",
   "logging": {
     "applicationInsights": {
-      "samplingSettings": {
-        "isEnabled": false
-      }
+      "samplingSettings": { "isEnabled": false }
     },
-    "logLevel": {
-      "default": "Information"
-    }
+    "logLevel": { "default": "Information" }
   },
   "extensions": {
     "http": {
       "routePrefix": ""
     }
+  },
+  "extensionBundle": {
+    "id": "Microsoft.Azure.Functions.ExtensionBundle",
+    "version": "[4.*, 5.0.0)"
   }
 }
