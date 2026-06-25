@@ -97,15 +97,14 @@
               "name": "WEBSITE_CONTENTAZUREFILECONNECTIONSTRING",
               "value": "[concat('DefaultEndpointsProtocol=https;AccountName=', variables('storageAccountName'), ';EndpointSuffix=', environment().suffixes.storage, ';AccountKey=', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2023-01-01').keys[0].value)]"
             },
-            { "name": "WEBSITE_CONTENTSHARE",                    "value": "[toLower(parameters('functionAppName'))]" },
-            { "name": "FUNCTIONS_EXTENSION_VERSION",             "value": "~4" },
-            { "name": "FUNCTIONS_WORKER_RUNTIME",                "value": "node" },
-            { "name": "WEBSITE_NODE_DEFAULT_VERSION",            "value": "~20" },
+            { "name": "WEBSITE_CONTENTSHARE",               "value": "[toLower(parameters('functionAppName'))]" },
+            { "name": "FUNCTIONS_EXTENSION_VERSION",        "value": "~4" },
+            { "name": "FUNCTIONS_WORKER_RUNTIME",           "value": "node" },
+            { "name": "WEBSITE_NODE_DEFAULT_VERSION",       "value": "~20" },
             {
               "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
               "value": "[reference(resourceId('Microsoft.Insights/components', variables('appInsightsName')), '2020-02-02').ConnectionString]"
-            },
-            { "name": "WEBSITE_RUN_FROM_PACKAGE",                "value": "1" }
+            }
           ]
         }
       }
@@ -119,10 +118,6 @@
     "functionAppUrl": {
       "type": "string",
       "value": "[concat('https://', reference(parameters('functionAppName')).defaultHostName)]"
-    },
-    "appInsightsName": {
-      "type": "string",
-      "value": "[variables('appInsightsName')]"
     }
   }
 }

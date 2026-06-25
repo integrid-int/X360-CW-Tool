@@ -1,62 +1,51 @@
 # ConnectWise Shim — x360Recover API Observer
 
-Impersonates a ConnectWise Manage instance. x360Recover connects successfully,
-then every API call it makes is logged to Application Insights. First step in
-building the Axcient → Halo PSA middleware.
+Impersonates a ConnectWise Manage instance. x360Recover connects successfully
+and every API call it makes is logged to Application Insights.
 
 ---
 
-## Deploy to Azure
+## Deploy
 
-### Option 1 — One-click (push to GitHub first)
+### Step 1 — Infrastructure (one click)
 
 [![Deploy to Azure](https://aka.ms/deploytoazure)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fintegrid-int%2FX360-CW-Tool%2Fmain%2Fazuredeploy.json)
 
-This creates all Azure infrastructure (Function App, Storage, App Insights,
-Log Analytics) in about 2 minutes. Then deploy the code:
+Creates: Function App, Storage Account, App Insights, Log Analytics.
 
-```bash
-npm install && npm run build
-func azure functionapp publish <function-app-name> --typescript
-```
-
-The function app name is shown in the deployment outputs in the Azure portal.
+Note the **Function App name** from the deployment outputs — you need it in Step 2.
 
 ---
 
-### Option 2 — Azure Developer CLI (one command, handles infra + code)
+### Step 2 — Code (GitHub Actions, runs automatically on push)
 
-```bash
-# Install azd if needed: https://aka.ms/azd-install
-azd up
-```
+1. **Get publish profile**
+   Portal → Function App → Overview → **Download publish profile**
 
-Prompts for subscription, resource group, and region. Done.
+2. **Add two GitHub secrets**
+   Repo → Settings → Secrets and variables → Actions → New repository secret
 
----
+   | Secret | Value |
+   |--------|-------|
+   | `AZURE_FUNCTIONAPP_NAME` | Function App name from Step 1 outputs |
+   | `AZURE_FUNCTIONAPP_PUBLISH_PROFILE` | Paste full contents of the downloaded publish profile file |
 
-### Option 3 — GitHub Actions (auto-deploy on push to main)
-
-After the Deploy to Azure button run, add two repo secrets:
-
-| Secret | Value |
-|--------|-------|
-| `AZURE_FUNCTIONAPP_NAME` | Function app name from deployment outputs |
-| `AZURE_FUNCTIONAPP_PUBLISH_PROFILE` | Portal → Function App → Deployment Center → Manage publish profile |
-
-Every push to `main` builds and deploys automatically.
+3. **Trigger deploy**
+   Push any change to `main` — GitHub Actions builds and deploys automatically.
+   Or: Actions tab → "Deploy to Azure Functions" → **Run workflow**.
 
 ---
 
-### Option 4 — Local with ngrok (fastest for testing)
+### Verify it's running
 
 ```bash
-npm install && npm run build && npm start
-# In another terminal:
-ngrok http 7071
+curl https://{your-function-app}.azurewebsites.net/v4_6_release/apis/3.0/system/info
 ```
 
-Point x360Recover at the ngrok HTTPS URL. Logs stream live in your terminal.
+Should return:
+```json
+{"version":"v2023.1.0.0","isCloud":false,"serverTimeZone":"Eastern Standard Time"}
+```
 
 ---
 
@@ -66,30 +55,24 @@ Point x360Recover at the ngrok HTTPS URL. Logs stream live in your terminal.
 |-------|-------|
 | Configure Using | ConnectWise |
 | URL | `https://{your-function-app}.azurewebsites.net` |
-| API Key | anything (shim accepts all auth) |
+| API Key | anything |
 | API Secret | anything |
 | MSP Company ID | `INTEGRID` |
 | Company ID | `1` |
-
-Click Save — the shim returns a valid CW connection response and the integration
-activates. Trigger a test alert to start capturing payloads.
 
 ---
 
 ## Reading the Logs
 
-**Azure portal → Function App → Application Insights → Logs**
+Portal → Function App → Application Insights → Logs
 
 ```kusto
-// All requests, newest first
+// All requests
 traces
 | where message == "CW_SHIM_REQUEST"
 | extend r = parse_json(tostring(customDimensions))
-| project timestamp,
-          method = tostring(r.method),
-          path   = tostring(r.path),
-          query  = tostring(r.query),
-          body   = tostring(r.body)
+| project timestamp, method = tostring(r.method), path = tostring(r.path),
+          query = tostring(r.query), body = tostring(r.body)
 | order by timestamp desc
 
 // Ticket operations only
@@ -97,44 +80,6 @@ traces
 | where message == "CW_SHIM_REQUEST"
 | extend r = parse_json(tostring(customDimensions))
 | where tostring(r.path) contains "tickets"
-| project timestamp, method = tostring(r.method),
-          path = tostring(r.path), body = tostring(r.body)
+| project timestamp, method = tostring(r.method), path = tostring(r.path), body = tostring(r.body)
 | order by timestamp desc
-
-// Routes not handled (add these to the shim)
-traces
-| where message startswith "UNHANDLED:"
-| project timestamp, message
-| order by timestamp desc
-```
-
----
-
-## What to Capture
-
-When x360Recover connects and fires an alert, look for:
-
-- **Connection test sequence** — which endpoints hit, in what order
-- **Auth header** — decode the Base64 `Authorization: Basic ...` to confirm field mapping
-- **Company lookup** — how `GET /company/companies` is filtered
-- **Ticket create body** — every field: summary format, priority, board reference, company mapping
-- **Dedup query** — the `?conditions=` string on `GET /service/tickets`
-- **Close/update body** — what changes on alert resolution
-
-Once you have one real create payload and one real close payload, the Halo
-translation layer is straightforward field mapping.
-
----
-
-## Project Structure
-
-```
-├── src/functions/cwShim.ts   # Catch-all HTTP trigger — logs + mock CW responses
-├── infra/main.bicep          # Azure infrastructure (for azd)
-├── azuredeploy.json          # ARM template (for Deploy to Azure button)
-├── azure.yaml                # Azure Developer CLI config
-├── .github/workflows/        # GitHub Actions CI/CD
-├── host.json
-├── package.json
-└── tsconfig.json
 ```
