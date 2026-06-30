@@ -79,6 +79,17 @@ test('company conditions support exact quoted name matching', async () => {
   assert.equal(res.jsonBody[0].name, 'Blue Ridge Law');
 });
 
+test('company id 1 maps to Integrid LLC for Axcient compatibility', async () => {
+  const { cwShim } = require('../dist/functions/cwShim.js');
+  const req = makeRequest('https://example.com/v4_6_release/apis/3.0/company/companies/1');
+  const res = await cwShim(req, context);
+
+  assert.equal(res.status, 200);
+  assert.equal(res.jsonBody.id, 1);
+  assert.equal(res.jsonBody.identifier, '1');
+  assert.equal(res.jsonBody.name, 'Integrid LLC');
+});
+
 test('service board types endpoint returns non-empty list', async () => {
   const { cwShim } = require('../dist/functions/cwShim.js');
   const req = makeRequest('https://example.com/v4_6_release/apis/3.0/service/boards/1/types');
@@ -119,4 +130,42 @@ test('login companyinfo endpoint returns connectwise discovery payload', async (
   assert.equal(res.jsonBody.Codebase, 'v4_6_release/');
   assert.equal(res.jsonBody.SiteUrl, 'example.com');
   assert.equal(typeof res.jsonBody.IsCloud, 'boolean');
+});
+
+test('ticket create normalizes blank nested fields and stores ticket', async () => {
+  const { cwShim } = require('../dist/functions/cwShim.js');
+  const createReq = makeRequest(
+    'https://example.com/v4_6_release/apis/3.0/service/tickets',
+    'POST',
+    JSON.stringify({
+      summary: 'Axcient test ticket',
+      board: { name: '' },
+      company: { identifier: '1' },
+      contact: { id: '' },
+      type: { name: '' },
+      initialDescription: 'created from test'
+    })
+  );
+
+  const createRes = await cwShim(createReq, context);
+  assert.equal(createRes.status, 201);
+  assert.equal(createRes.jsonBody.board.name, 'Service Desk');
+  assert.equal(createRes.jsonBody.company.id, 1);
+  assert.equal(createRes.jsonBody.company.identifier, '1');
+  assert.equal(createRes.jsonBody.company.name, 'Integrid LLC');
+  assert.equal(createRes.jsonBody.type.name, 'General');
+  assert.equal(createRes.jsonBody.contact.id, 1);
+
+  const id = createRes.jsonBody.id;
+  const getReq = makeRequest(`https://example.com/v4_6_release/apis/3.0/service/tickets/${id}`);
+  const getRes = await cwShim(getReq, context);
+  assert.equal(getRes.status, 200);
+  assert.equal(getRes.jsonBody.id, id);
+  assert.equal(getRes.jsonBody.summary, 'Axcient test ticket');
+
+  const listReq = makeRequest('https://example.com/v4_6_release/apis/3.0/service/tickets');
+  const listRes = await cwShim(listReq, context);
+  assert.equal(listRes.status, 200);
+  assert.ok(Array.isArray(listRes.jsonBody));
+  assert.ok(listRes.jsonBody.some((t) => t.id === id));
 });

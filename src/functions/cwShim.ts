@@ -50,6 +50,7 @@ const MOCK_CONTACTS = [
 ];
 
 const CUSTOMER_COMPANIES = [
+  { id: 1, name: 'Integrid LLC', identifier: '1' },
   { id: 12, name: 'Integrid LLC', identifier: '12' },
   { id: 15, name: 'Blue Ridge Law', identifier: '15' },
   { id: 16, name: 'Cenergy Plumbing', identifier: '16' },
@@ -93,6 +94,7 @@ const CUSTOMER_COMPANIES = [
   { id: 103, name: 'RWMG', identifier: '103' },
   { id: 104, name: 'The Law Office Of Ben C Morgan', identifier: '104' }
 ];
+const CREATED_TICKETS = new Map<number, Record<string, unknown>>();
 
 function getAuthIdentifier(req: HttpRequest): string {
   const authHeader = req.headers.get('authorization') ?? '';
@@ -157,6 +159,65 @@ function createCompany(identifier: string, id = 1) {
     return { ...MOCK_COMPANIES[0], id: customer.id, identifier: customer.identifier, name: customer.name };
   }
   return { ...MOCK_COMPANIES[0], id, identifier, name: `Customer ${id}` };
+}
+
+function getNestedString(record: Record<string, unknown>, parentKey: string, key: string): string | null {
+  const parent = record[parentKey];
+  if (!parent || typeof parent !== 'object') return null;
+  const value = (parent as Record<string, unknown>)[key];
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function getNestedNumber(record: Record<string, unknown>, parentKey: string, key: string): number | null {
+  const parent = record[parentKey];
+  if (!parent || typeof parent !== 'object') return null;
+  const value = (parent as Record<string, unknown>)[key];
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function resolveCompanyFromIdentifier(identifier: string | null, fallbackIdentifier: string): Record<string, unknown> {
+  if (!identifier) return createCompany(fallbackIdentifier, 1);
+
+  const customerByIdentifier = CUSTOMER_COMPANIES.find((c) => c.identifier.toLowerCase() === identifier.toLowerCase());
+  if (customerByIdentifier) return createCompany(customerByIdentifier.identifier, customerByIdentifier.id);
+
+  const customerByName = CUSTOMER_COMPANIES.find((c) => c.name.toLowerCase() === identifier.toLowerCase());
+  if (customerByName) return createCompany(customerByName.identifier, customerByName.id);
+
+  const asId = Number(identifier);
+  if (Number.isFinite(asId)) return createCompany(identifier, asId);
+
+  return createCompany(identifier, 1);
+}
+
+function applyPatchOperations(base: Record<string, unknown>, operations: unknown[]): Record<string, unknown> {
+  const output = { ...base };
+  for (const operation of operations) {
+    if (!operation || typeof operation !== 'object') continue;
+    const opRecord = operation as Record<string, unknown>;
+    if (opRecord.op !== 'replace' && opRecord.op !== 'add') continue;
+    if (typeof opRecord.path !== 'string') continue;
+    const path = opRecord.path.split('/').filter(Boolean);
+    if (path.length === 0) continue;
+
+    if (path.length === 1) {
+      output[path[0]] = opRecord.value;
+      continue;
+    }
+
+    const [head, tail] = path;
+    const parent = output[head];
+    if (!parent || typeof parent !== 'object') continue;
+    (parent as Record<string, unknown>)[tail] = opRecord.value;
+  }
+  return output;
 }
 
 function getContactIdFromPath(path: string): number | null {
@@ -266,34 +327,64 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
     return { status: 200, headers: h, jsonBody: [createCompany(effectiveIdentifier, companyId)] };
   }
 
-  if (path.includes('/service/tickets') && method === 'GET')
-                                                return { status: 200, headers: h, jsonBody: [] };
-
   if (path.includes('/service/tickets') && method === 'POST') {
     let parsed: Record<string, unknown> = {};
     try { parsed = JSON.parse(body); } catch {}
     const fakeId = Math.floor(Math.random() * 90000) + 10000;
+    const companyIdentifier = getNestedString(parsed, 'company', 'identifier')
+      ?? getNestedString(parsed, 'company', 'id');
+    const company = resolveCompanyFromIdentifier(companyIdentifier, effectiveIdentifier);
+    const boardName = getNestedString(parsed, 'board', 'name') ?? 'Service Desk';
+    const typeName = getNestedString(parsed, 'type', 'name') ?? 'General';
+    const contactId = getNestedNumber(parsed, 'contact', 'id') ?? 1;
+    const summary = typeof parsed.summary === 'string' && parsed.summary.trim().length > 0
+      ? parsed.summary
+      : 'Shim ticket';
+    const requiredDate = typeof parsed.requiredDate === 'string' ? parsed.requiredDate : new Date().toISOString();
+
+    const ticket = {
+      id: fakeId,
+      summary,
+      initialDescription: typeof parsed.initialDescription === 'string' ? parsed.initialDescription : '',
+      status: { id: 1, name: 'New' },
+      board: { id: 1, name: boardName },
+      company,
+      contact: { id: contactId, name: MOCK_CONTACTS[0].name },
+      type: { id: 1, name: typeName },
+      requiredDate,
+      _info: { lastUpdated: new Date().toISOString() }
+    };
+    CREATED_TICKETS.set(fakeId, ticket);
     context.log(`TICKET_CREATE fake_id=${fakeId}`, JSON.stringify(parsed));
     return {
       status: 201, headers: h,
-      jsonBody: { id: fakeId, summary: parsed.summary ?? 'Shim ticket',
-                  status: { id: 1, name: 'New' }, board: { id: 1, name: 'Service Desk' },
-                  company: { id: 1, identifier: 'INTEGRID', name: 'Integrid LLC' } }
+      jsonBody: ticket
     };
   }
 
   if (path.match(/\/service\/tickets\/\d+/) && (method === 'PUT' || method === 'PATCH')) {
     const ticketId = path.match(/\/tickets\/(\d+)/)?.[1];
-    let parsed: Record<string, unknown> = {};
+    let parsed: Record<string, unknown> | unknown[] = {};
     try { parsed = JSON.parse(body); } catch {}
+    const numericTicketId = Number(ticketId);
+    const base = CREATED_TICKETS.get(numericTicketId) ?? { id: numericTicketId, status: { id: 1, name: 'New' } };
+    const updated = Array.isArray(parsed)
+      ? applyPatchOperations(base, parsed)
+      : { ...base, ...parsed };
+    CREATED_TICKETS.set(numericTicketId, updated);
     context.log(`TICKET_UPDATE id=${ticketId}`, JSON.stringify(parsed));
-    return { status: 200, headers: h, jsonBody: { id: Number(ticketId), ...parsed } };
+    return { status: 200, headers: h, jsonBody: updated };
   }
 
   if (path.match(/\/service\/tickets\/\d+/) && method === 'GET') {
-    const ticketId = path.match(/\/tickets\/(\d+)/)?.[1];
-    return { status: 200, headers: h, jsonBody: { id: Number(ticketId), status: { id: 1, name: 'New' } } };
+    const ticketId = Number(path.match(/\/tickets\/(\d+)/)?.[1]);
+    const ticket = CREATED_TICKETS.get(ticketId);
+    if (ticket) return { status: 200, headers: h, jsonBody: ticket };
+    return { status: 200, headers: h, jsonBody: { id: ticketId, status: { id: 1, name: 'New' } } };
   }
+
+  if (path.includes('/service/tickets') && method === 'GET')
+                                               return { status: 200, headers: h, jsonBody: Array.from(CREATED_TICKETS.values()) };
 
   context.log(`UNHANDLED ${method} ${path}`);
   return { status: 200, headers: h, jsonBody: [] };
