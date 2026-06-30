@@ -55,9 +55,21 @@ function parseConditionValue(conditions: string, field: string): string | null {
   return match?.[1] ?? null;
 }
 
+function parseConditionNumber(conditions: string, field: string): number | null {
+  const value = parseConditionValue(conditions, field);
+  if (!value) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function getIdentifierFromConditions(req: HttpRequest): string | null {
   const conditions = req.query.get('conditions') ?? '';
   return parseConditionValue(conditions, 'identifier');
+}
+
+function getCompanyIdFromConditions(req: HttpRequest): number | null {
+  const conditions = req.query.get('conditions') ?? '';
+  return parseConditionNumber(conditions, 'id');
 }
 
 function getCompanyIdFromPath(path: string): number | null {
@@ -110,6 +122,8 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
 
   if (path.includes('/system/info'))            return { status: 200, headers: h, jsonBody: MOCK_SYSTEM_INFO };
   if (path.includes('/system/members/me'))      return { status: 200, headers: h, jsonBody: createMember(authIdentifier) };
+  if (path.match(/\/system\/members\/count$/) && method === 'GET')
+                                               return { status: 200, headers: h, jsonBody: { count: 1 } };
   if (path.match(/\/system\/members\/\d+$/))    return { status: 200, headers: h, jsonBody: createMember(effectiveIdentifier) };
   if (path.includes('/system/members') && method === 'GET')
                                                return { status: 200, headers: h, jsonBody: [createMember(effectiveIdentifier)] };
@@ -121,11 +135,13 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
   if (path.match(/\/company\/companies\/count$/) && method === 'GET')
                                                return { status: 200, headers: h, jsonBody: { count: 1 } };
   if (path.includes('/company/companies') && method === 'GET') {
+    const companyIdFromConditions = getCompanyIdFromConditions(req);
     const companyIdFromPath = getCompanyIdFromPath(path);
+    const companyId = companyIdFromPath ?? companyIdFromConditions ?? 1;
     if (companyIdFromPath !== null) {
-      return { status: 200, headers: h, jsonBody: createCompany(effectiveIdentifier, companyIdFromPath) };
+      return { status: 200, headers: h, jsonBody: createCompany(effectiveIdentifier, companyId) };
     }
-    return { status: 200, headers: h, jsonBody: [createCompany(effectiveIdentifier)] };
+    return { status: 200, headers: h, jsonBody: [createCompany(effectiveIdentifier, companyId)] };
   }
 
   if (path.includes('/service/tickets') && method === 'GET')
