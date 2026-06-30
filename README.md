@@ -22,13 +22,13 @@ Note the **Function App name** from the deployment outputs — you need it in St
 1. **Get publish profile**
    Portal → Function App → Overview → **Download publish profile**
 
-2. **Add two GitHub secrets**
+2. **Add GitHub secrets**
    Repo → Settings → Secrets and variables → Actions → New repository secret
 
    | Secret | Value |
    |--------|-------|
-   | `AZURE_FUNCTIONAPP_NAME` | Function App name from Step 1 outputs |
    | `AZURE_FUNCTIONAPP_PUBLISH_PROFILE` | Paste full contents of the downloaded publish profile file |
+   | `AZURE_FUNCTIONAPP_NAME` *(optional)* | Function App name from Step 1 outputs. If omitted, workflow derives it from publish profile. |
 
 3. **Trigger deploy**
    Push any change to `main` — GitHub Actions builds and deploys automatically.

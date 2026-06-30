@@ -2,6 +2,7 @@
   "name": "cw-shim",
   "version": "1.0.0",
   "description": "ConnectWise API shim for x360Recover",
+  "main": "dist/functions/*.js",
   "scripts": {
     "build": "tsc",
     "watch": "tsc -w",

@@ -21,10 +21,41 @@ jobs:
           npm ci
           npm run build
 
+      - name: Resolve Function App name
+        id: resolve_app_name
+        env:
+          AZURE_FUNCTIONAPP_NAME: ${{ secrets.AZURE_FUNCTIONAPP_NAME }}
+          AZURE_FUNCTIONAPP_PUBLISH_PROFILE: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
+        run: |
+          set -euo pipefail
+
+          APP_NAME="${AZURE_FUNCTIONAPP_NAME:-}"
+
+          if [ -z "$APP_NAME" ]; then
+            if [ -z "${AZURE_FUNCTIONAPP_PUBLISH_PROFILE:-}" ]; then
+              echo "::error::AZURE_FUNCTIONAPP_PUBLISH_PROFILE secret is missing."
+              exit 1
+            fi
+
+            APP_NAME="$(node -e '
+              const profile = (process.env.AZURE_FUNCTIONAPP_PUBLISH_PROFILE || "").trim();
+              const match = profile.match(/(?:msdeploySite|siteName)="([^"]+)"/i);
+              if (!match || !match[1]) process.exit(1);
+              process.stdout.write(match[1]);
+            ')"
+
+            if [ -z "$APP_NAME" ]; then
+              echo "::error::Unable to derive Function App name from AZURE_FUNCTIONAPP_PUBLISH_PROFILE."
+              exit 1
+            fi
+          fi
+
+          echo "app_name=$APP_NAME" >> "$GITHUB_OUTPUT"
+
       - name: Deploy to Azure Functions
         uses: Azure/functions-action@v1
         with:
-          app-name: ${{ secrets.AZURE_FUNCTIONAPP_NAME }}
+          app-name: ${{ steps.resolve_app_name.outputs.app_name }}
           package: '.'
           publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
           respect-funcignore: true
