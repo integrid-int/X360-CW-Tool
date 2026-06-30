@@ -67,6 +67,25 @@ Should return:
 
 ---
 
+## Halo Phase 2 configuration
+
+Set these Function App environment variables to enable live Halo lookups and ticket sync:
+
+| Variable | Description |
+|---|---|
+| `HaloClientID` | Halo OAuth client ID |
+| `HaloSecret` | Halo OAuth client secret |
+| `HaloUrl` | Halo base URL (for example `https://integrid.halopsa.com`) |
+| `HaloClosedStatusId` *(optional)* | Closed status id used when Axcient resolves an alert (defaults to `9`) |
+| `HaloTenant` *(optional)* | Halo tenant name if your auth endpoint requires `?tenant=` |
+
+When these variables are set, the shim will:
+- Use Halo API responses for companies, contacts, boards, types, statuses, and priorities.
+- Create tickets in Halo on `POST /service/tickets`.
+- Close existing tickets on resolved callbacks using Halo closed status id (default `9`).
+
+---
+
 ## Reading the Logs
 
 Portal → Function App → Application Insights → Logs
