@@ -59,11 +59,27 @@ jobs:
 
           echo "app_name=$APP_NAME" >> "$GITHUB_OUTPUT"
 
+      - name: Create deployment package
+        run: |
+          set -euo pipefail
+
+          PACKAGE_DIR=".azure-functions-package"
+          rm -rf "$PACKAGE_DIR"
+          mkdir -p "$PACKAGE_DIR"
+
+          cp host.json package.json package-lock.json "$PACKAGE_DIR"/
+          cp -R dist node_modules "$PACKAGE_DIR"/
+
+          test -f "$PACKAGE_DIR/host.json"
+          test -f "$PACKAGE_DIR/package.json"
+          compgen -G "$PACKAGE_DIR/dist/functions/*.js" > /dev/null
+          test -d "$PACKAGE_DIR/node_modules/@azure/functions"
+
       - name: Deploy to Azure Functions
         uses: Azure/functions-action@v1
         with:
           app-name: ${{ steps.resolve_app_name.outputs.app_name }}
-          package: '.'
+          package: '.azure-functions-package'
           publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
-          respect-funcignore: true
+          respect-funcignore: false
           scm-do-build-during-deployment: false
