@@ -124,6 +124,14 @@ function parseConditionNumber(conditions: string, field: string): number | null 
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function parseConditionBoolean(conditions: string, field: string): boolean | null {
+  const value = parseConditionValue(conditions, field);
+  if (!value) return null;
+  if (value.toLowerCase() === 'true') return true;
+  if (value.toLowerCase() === 'false') return false;
+  return null;
+}
+
 function getIdentifierFromConditions(req: HttpRequest): string | null {
   const conditions = req.query.get('conditions') ?? '';
   return parseConditionValue(conditions, 'identifier');
@@ -220,6 +228,26 @@ function applyPatchOperations(base: Record<string, unknown>, operations: unknown
   return output;
 }
 
+function filterStatuses(conditions: string) {
+  let statuses = [...MOCK_STATUSES];
+  const id = parseConditionNumber(conditions, 'id');
+  if (id !== null) statuses = statuses.filter((status) => status.id === id);
+  const name = parseConditionValue(conditions, 'name');
+  if (name) statuses = statuses.filter((status) => status.name.toLowerCase() === name.toLowerCase());
+  const closedStatus = parseConditionBoolean(conditions, 'closedStatus');
+  if (closedStatus !== null) statuses = statuses.filter((status) => status.closedStatus === closedStatus);
+  return statuses;
+}
+
+function filterPriorities(conditions: string) {
+  let priorities = [...MOCK_PRIORITIES];
+  const id = parseConditionNumber(conditions, 'id');
+  if (id !== null) priorities = priorities.filter((priority) => priority.id === id);
+  const name = parseConditionValue(conditions, 'name');
+  if (name) priorities = priorities.filter((priority) => priority.name.toLowerCase() === name.toLowerCase());
+  return priorities;
+}
+
 function getContactIdFromPath(path: string): number | null {
   const match = path.match(/\/company\/contacts\/(\d+)$/);
   if (!match?.[1]) return null;
@@ -292,8 +320,10 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
                                                 return { status: 200, headers: h, jsonBody: MOCK_BOARDS };
   if (path.match(/\/service\/boards\/\d+$/) && method === 'GET')
                                                return { status: 200, headers: h, jsonBody: MOCK_BOARDS[0] };
-  if (path.match(/\/service\/boards\/\d+\/statuses/))
-                                                return { status: 200, headers: h, jsonBody: MOCK_STATUSES };
+  if (path.match(/\/service\/boards\/\d+\/statuses/)) {
+    const conditions = req.query.get('conditions') ?? '';
+    return { status: 200, headers: h, jsonBody: filterStatuses(conditions) };
+  }
   if (path.match(/\/service\/boards\/\d+\/types\/\d+\/subtypes\/count$/) && method === 'GET')
                                                return { status: 200, headers: h, jsonBody: { count: MOCK_SUBTYPES.length } };
   if (path.match(/\/service\/boards\/\d+\/types\/\d+\/subtypes$/) && method === 'GET')
@@ -302,7 +332,10 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
                                                return { status: 200, headers: h, jsonBody: { count: MOCK_TYPES.length } };
   if (path.match(/\/service\/boards\/\d+\/types$/) && method === 'GET')
                                                return { status: 200, headers: h, jsonBody: MOCK_TYPES };
-  if (path.includes('/service/priorities'))     return { status: 200, headers: h, jsonBody: MOCK_PRIORITIES };
+  if (path.includes('/service/priorities')) {
+    const conditions = req.query.get('conditions') ?? '';
+    return { status: 200, headers: h, jsonBody: filterPriorities(conditions) };
+  }
   if (path.match(/\/company\/contacts\/count$/) && method === 'GET')
                                                return { status: 200, headers: h, jsonBody: { count: MOCK_CONTACTS.length } };
   if (path.includes('/company/contacts') && method === 'GET') {
