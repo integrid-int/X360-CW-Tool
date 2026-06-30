@@ -84,3 +84,15 @@ test('company contacts endpoint returns non-empty list', async () => {
   assert.ok(Array.isArray(res.jsonBody));
   assert.ok(res.jsonBody.length > 0);
 });
+
+test('login companyinfo endpoint returns connectwise discovery payload', async () => {
+  const { cwShim } = require('../dist/functions/cwShim.js');
+  const req = makeRequest('https://example.com/login/companyinfo/INTEGRID');
+  const res = await cwShim(req, context);
+
+  assert.equal(res.status, 200);
+  assert.equal(res.jsonBody.CompanyID, 'INTEGRID');
+  assert.equal(res.jsonBody.Codebase, 'v4_6_release/');
+  assert.equal(res.jsonBody.SiteUrl, 'example.com');
+  assert.equal(typeof res.jsonBody.IsCloud, 'boolean');
+});
