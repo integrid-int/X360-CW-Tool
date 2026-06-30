@@ -34,6 +34,11 @@ Note the **Function App name** from the deployment outputs — you need it in St
    Push any change to `main` — GitHub Actions builds and deploys automatically.
    Or: Actions tab → "Deploy to Azure Functions" → **Run workflow**.
 
+4. **If deployment fails with Kudu 401 (`Failed to fetch Kudu App Settings`)**
+   - Download a **fresh** publish profile from the same Function App and replace `AZURE_FUNCTIONAPP_PUBLISH_PROFILE`.
+   - In the Function App, ensure **SCM Basic Auth Publishing Credentials** is enabled.
+   - Re-run the workflow.
+
 ---
 
 ### Verify it's running
