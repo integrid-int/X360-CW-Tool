@@ -49,6 +49,51 @@ const MOCK_CONTACTS = [
   { id: 1, firstName: 'Axcient', lastName: 'Integration', name: 'Axcient Integration' }
 ];
 
+const CUSTOMER_COMPANIES = [
+  { id: 12, name: 'Integrid LLC', identifier: '12' },
+  { id: 15, name: 'Blue Ridge Law', identifier: '15' },
+  { id: 16, name: 'Cenergy Plumbing', identifier: '16' },
+  { id: 17, name: 'Centric Mechanical', identifier: '17' },
+  { id: 20, name: 'Fortuna Enterprises LLC', identifier: '20' },
+  { id: 24, name: 'IBEW 342', identifier: '24' },
+  { id: 26, name: 'JATC 342', identifier: '26' },
+  { id: 27, name: 'Law Office of Ben Morgan', identifier: '27' },
+  { id: 29, name: 'McLeod Belting Company, Inc.', identifier: '29' },
+  { id: 30, name: 'Moonlight Imaging', identifier: '30' },
+  { id: 31, name: 'North State Sales Company', identifier: '31' },
+  { id: 32, name: 'NuWray LLC', identifier: '32' },
+  { id: 33, name: 'Piedmont Chain', identifier: '33' },
+  { id: 34, name: 'Piedmont Precision Cabling LLC', identifier: '34' },
+  { id: 35, name: 'Pinnacle Contracting Services', identifier: '35' },
+  { id: 36, name: 'RCI Doors', identifier: '36' },
+  { id: 37, name: 'Reganess Wealth Management', identifier: '37' },
+  { id: 38, name: 'Schwarz Properties', identifier: '38' },
+  { id: 39, name: 'Service First Logistics', identifier: '39' },
+  { id: 40, name: 'Tabor Espresso', identifier: '40' },
+  { id: 41, name: 'Test Corp', identifier: '41' },
+  { id: 42, name: 'The Shoe Market', identifier: '42' },
+  { id: 43, name: 'Volvo Cars of Winston Salem', identifier: '43' },
+  { id: 45, name: 'Wynnefield Properties', identifier: '45' },
+  { id: 46, name: 'Black Mountain Music', identifier: '46' },
+  { id: 70, name: 'Forum Supply Company', identifier: '70' },
+  { id: 71, name: 'Gold Medal Intl', identifier: '71' },
+  { id: 72, name: '_TESTING', identifier: '72' },
+  { id: 81, name: 'Integrid', identifier: '81' },
+  { id: 84, name: 'Sustainable H2O', identifier: '84' },
+  { id: 85, name: 'EBCO Aviation', identifier: '85' },
+  { id: 89, name: 'Integrid Inventory', identifier: '89' },
+  { id: 91, name: "Bobby's Friendly Towing", identifier: '91' },
+  { id: 93, name: 'Cecil & Cecil PA', identifier: '93' },
+  { id: 94, name: 'Etruscan Imports', identifier: '94' },
+  { id: 95, name: 'Furniture Solutions 360', identifier: '95' },
+  { id: 96, name: 'Global Renewable Energy Consultants', identifier: '96' },
+  { id: 97, name: 'Lewis Logistics', identifier: '97' },
+  { id: 98, name: 'Nichols Quality Associates', identifier: '98' },
+  { id: 102, name: 'Carolina Electrical Joint Apprenticeship Training', identifier: '102' },
+  { id: 103, name: 'RWMG', identifier: '103' },
+  { id: 104, name: 'The Law Office Of Ben C Morgan', identifier: '104' }
+];
+
 function getAuthIdentifier(req: HttpRequest): string {
   const authHeader = req.headers.get('authorization') ?? '';
   const match = authHeader.match(/^Basic\s+(.+)$/i);
@@ -64,9 +109,10 @@ function getAuthIdentifier(req: HttpRequest): string {
 }
 
 function parseConditionValue(conditions: string, field: string): string | null {
-  const regex = new RegExp(`${field}\\s*=\\s*["']?([^"',)\\s]+)`, 'i');
+  const regex = new RegExp(`${field}\\s*=\\s*(?:"([^"]+)"|'([^']+)'|([^,\\)\\s]+))`, 'i');
   const match = conditions.match(regex);
-  return match?.[1] ?? null;
+  if (!match) return null;
+  return match[1] ?? match[2] ?? match[3] ?? null;
 }
 
 function parseConditionNumber(conditions: string, field: string): number | null {
@@ -83,7 +129,16 @@ function getIdentifierFromConditions(req: HttpRequest): string | null {
 
 function getCompanyIdFromConditions(req: HttpRequest): number | null {
   const conditions = req.query.get('conditions') ?? '';
-  return parseConditionNumber(conditions, 'id');
+  const idFromId = parseConditionNumber(conditions, 'id');
+  if (idFromId !== null) return idFromId;
+
+  const idFromIdentifier = parseConditionNumber(conditions, 'identifier');
+  if (idFromIdentifier !== null) return idFromIdentifier;
+
+  const companyName = parseConditionValue(conditions, 'name') ?? parseConditionValue(conditions, 'identifier');
+  if (!companyName) return null;
+  const found = CUSTOMER_COMPANIES.find((c) => c.name.toLowerCase() === companyName.toLowerCase());
+  return found?.id ?? null;
 }
 
 function getCompanyIdFromPath(path: string): number | null {
@@ -97,7 +152,11 @@ function createMember(identifier: string) {
 }
 
 function createCompany(identifier: string, id = 1) {
-  return { ...MOCK_COMPANIES[0], id, identifier };
+  const customer = CUSTOMER_COMPANIES.find((c) => c.id === id);
+  if (customer) {
+    return { ...MOCK_COMPANIES[0], id: customer.id, identifier: customer.identifier, name: customer.name };
+  }
+  return { ...MOCK_COMPANIES[0], id, identifier, name: `Customer ${id}` };
 }
 
 function getContactIdFromPath(path: string): number | null {
@@ -193,13 +252,16 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
     return { status: 200, headers: h, jsonBody: MOCK_CONTACTS };
   }
   if (path.match(/\/company\/companies\/count$/) && method === 'GET')
-                                               return { status: 200, headers: h, jsonBody: { count: 1 } };
+                                               return { status: 200, headers: h, jsonBody: { count: CUSTOMER_COMPANIES.length } };
   if (path.includes('/company/companies') && method === 'GET') {
     const companyIdFromConditions = getCompanyIdFromConditions(req);
     const companyIdFromPath = getCompanyIdFromPath(path);
     const companyId = companyIdFromPath ?? companyIdFromConditions ?? 1;
     if (companyIdFromPath !== null) {
       return { status: 200, headers: h, jsonBody: createCompany(effectiveIdentifier, companyId) };
+    }
+    if (companyIdFromConditions === null) {
+      return { status: 200, headers: h, jsonBody: CUSTOMER_COMPANIES.map((c) => createCompany(c.identifier, c.id)) };
     }
     return { status: 200, headers: h, jsonBody: [createCompany(effectiveIdentifier, companyId)] };
   }

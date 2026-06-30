@@ -26,14 +26,15 @@ test('system members endpoint returns at least one member', async () => {
   assert.ok(res.jsonBody.length > 0);
 });
 
-test('company by id endpoint returns object shape', async () => {
+test('company by id endpoint returns mapped customer data', async () => {
   const { cwShim } = require('../dist/functions/cwShim.js');
-  const req = makeRequest('https://example.com/v4_6_release/apis/3.0/company/companies/1');
+  const req = makeRequest('https://example.com/v4_6_release/apis/3.0/company/companies/15');
   const res = await cwShim(req, context);
 
   assert.equal(res.status, 200);
   assert.ok(!Array.isArray(res.jsonBody));
-  assert.equal(res.jsonBody.id, 1);
+  assert.equal(res.jsonBody.id, 15);
+  assert.equal(res.jsonBody.name, 'Blue Ridge Law');
 });
 
 test('system members count endpoint returns count object', async () => {
@@ -53,6 +54,29 @@ test('company list respects id from conditions', async () => {
   assert.equal(res.status, 200);
   assert.ok(Array.isArray(res.jsonBody));
   assert.equal(res.jsonBody[0].id, 321);
+});
+
+test('company list returns uploaded customers when no conditions are provided', async () => {
+  const { cwShim } = require('../dist/functions/cwShim.js');
+  const req = makeRequest('https://example.com/v4_6_release/apis/3.0/company/companies');
+  const res = await cwShim(req, context);
+
+  assert.equal(res.status, 200);
+  assert.ok(Array.isArray(res.jsonBody));
+  assert.ok(res.jsonBody.length > 20);
+  assert.ok(res.jsonBody.some((c) => c.id === 12 && c.name === 'Integrid LLC'));
+  assert.ok(res.jsonBody.some((c) => c.id === 15 && c.name === 'Blue Ridge Law'));
+});
+
+test('company conditions support exact quoted name matching', async () => {
+  const { cwShim } = require('../dist/functions/cwShim.js');
+  const req = makeRequest("https://example.com/v4_6_release/apis/3.0/company/companies?conditions=name='Blue Ridge Law'");
+  const res = await cwShim(req, context);
+
+  assert.equal(res.status, 200);
+  assert.ok(Array.isArray(res.jsonBody));
+  assert.equal(res.jsonBody[0].id, 15);
+  assert.equal(res.jsonBody[0].name, 'Blue Ridge Law');
 });
 
 test('service board types endpoint returns non-empty list', async () => {
