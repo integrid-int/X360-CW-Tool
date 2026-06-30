@@ -110,7 +110,6 @@ function getLoginCompanyIdFromPath(path: string): string | null {
   const match = path.match(/\/login\/companyinfo\/([^/]+)$/i);
   return match?.[1] ?? null;
 }
-
 // ── Logger ────────────────────────────────────────────────────────────────────
 
 function logRequest(req: HttpRequest, context: InvocationContext, body: string): void {
