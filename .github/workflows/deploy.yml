@@ -59,6 +59,65 @@ jobs:
 
           echo "app_name=$APP_NAME" >> "$GITHUB_OUTPUT"
 
+      - name: Validate Kudu access from publish profile
+        env:
+          AZURE_FUNCTIONAPP_PUBLISH_PROFILE: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
+        run: |
+          set -euo pipefail
+
+          SCM_INFO="$(node -e '
+            const profile = (process.env.AZURE_FUNCTIONAPP_PUBLISH_PROFILE || "").trim();
+            const tags = [...profile.matchAll(/<publishProfile\b[^>]*>/gi)].map((m) => m[0]);
+            const readAttr = (tag, attr) => {
+              const match = tag.match(new RegExp(`${attr}="([^"]+)"`, "i"));
+              return match && match[1] ? match[1] : "";
+            };
+
+            let fallback = "";
+            for (const tag of tags) {
+              const publishUrl = readAttr(tag, "publishUrl");
+              const userName = readAttr(tag, "userName");
+              const userPWD = readAttr(tag, "userPWD");
+              if (!publishUrl || !userName || !userPWD) continue;
+              const packed = [publishUrl, userName, userPWD].join("\n");
+              if (!fallback) fallback = packed;
+              if (publishUrl.includes(".scm.")) {
+                process.stdout.write(packed);
+                process.exit(0);
+              }
+            }
+
+            process.stdout.write(fallback);
+          ')"
+
+          if [ -z "$SCM_INFO" ]; then
+            echo "::error::Unable to extract Kudu credentials from AZURE_FUNCTIONAPP_PUBLISH_PROFILE."
+            exit 1
+          fi
+
+          mapfile -t SCM_LINES <<< "$SCM_INFO"
+          SCM_URL="${SCM_LINES[0]:-}"
+          SCM_USERNAME="${SCM_LINES[1]:-}"
+          SCM_PASSWORD="${SCM_LINES[2]:-}"
+
+          if [ -z "$SCM_URL" ] || [ -z "$SCM_USERNAME" ] || [ -z "$SCM_PASSWORD" ]; then
+            echo "::error::Publish profile did not contain complete Kudu credentials."
+            exit 1
+          fi
+
+          SCM_URL="${SCM_URL#https://}"
+          SCM_URL="${SCM_URL#http://}"
+
+          STATUS_CODE="$(curl --silent --show-error --output /dev/null --write-out "%{http_code}" --user "$SCM_USERNAME:$SCM_PASSWORD" "https://${SCM_URL}/api/settings")"
+
+          if [ "$STATUS_CODE" != "200" ]; then
+            if [ "$STATUS_CODE" = "401" ]; then
+              echo "::error::Publish profile authentication failed against Kudu (401). Re-download the Function App publish profile, update AZURE_FUNCTIONAPP_PUBLISH_PROFILE, and ensure 'SCM Basic Auth Publishing Credentials' is enabled."
+            else
+              echo "::error::Kudu app settings check failed with status ${STATUS_CODE} using publish profile credentials."
+            fi
+            exit 1
+          fi
       - name: Create deployment package
         run: |
           set -euo pipefail

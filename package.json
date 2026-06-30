@@ -5,6 +5,7 @@
   "main": "dist/functions/*.js",
   "scripts": {
     "build": "tsc",
+    "test": "node --test tests/**/*.test.js",
     "watch": "tsc -w",
     "prestart": "npm run build",
     "start": "func start"
