@@ -54,3 +54,33 @@ test('company list respects id from conditions', async () => {
   assert.ok(Array.isArray(res.jsonBody));
   assert.equal(res.jsonBody[0].id, 321);
 });
+
+test('service board types endpoint returns non-empty list', async () => {
+  const { cwShim } = require('../dist/functions/cwShim.js');
+  const req = makeRequest('https://example.com/v4_6_release/apis/3.0/service/boards/1/types');
+  const res = await cwShim(req, context);
+
+  assert.equal(res.status, 200);
+  assert.ok(Array.isArray(res.jsonBody));
+  assert.ok(res.jsonBody.length > 0);
+});
+
+test('service board subtypes endpoint returns non-empty list', async () => {
+  const { cwShim } = require('../dist/functions/cwShim.js');
+  const req = makeRequest('https://example.com/v4_6_release/apis/3.0/service/boards/1/types/1/subtypes');
+  const res = await cwShim(req, context);
+
+  assert.equal(res.status, 200);
+  assert.ok(Array.isArray(res.jsonBody));
+  assert.ok(res.jsonBody.length > 0);
+});
+
+test('company contacts endpoint returns non-empty list', async () => {
+  const { cwShim } = require('../dist/functions/cwShim.js');
+  const req = makeRequest('https://example.com/v4_6_release/apis/3.0/company/contacts');
+  const res = await cwShim(req, context);
+
+  assert.equal(res.status, 200);
+  assert.ok(Array.isArray(res.jsonBody));
+  assert.ok(res.jsonBody.length > 0);
+});

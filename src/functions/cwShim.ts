@@ -30,9 +30,21 @@ const MOCK_PRIORITIES = [
   { id: 4, name: 'Priority 4 - Low',      sortOrder: 4 }
 ];
 
+const MOCK_TYPES = [
+  { id: 1, name: 'Support', boardId: 1, inactiveFlag: false }
+];
+
+const MOCK_SUBTYPES = [
+  { id: 1, name: 'Backup', boardId: 1, typeId: 1, inactiveFlag: false }
+];
+
 const MOCK_COMPANIES = [
   { id: 1, identifier: 'INTEGRID', name: 'Integrid LLC',
     status: { id: 1, name: 'Active' }, type: { id: 1, name: 'Managed' } }
+];
+
+const MOCK_CONTACTS = [
+  { id: 1, firstName: 'Axcient', lastName: 'Integration', name: 'Axcient Integration' }
 ];
 
 function getAuthIdentifier(req: HttpRequest): string {
@@ -86,6 +98,12 @@ function createCompany(identifier: string, id = 1) {
   return { ...MOCK_COMPANIES[0], id, identifier };
 }
 
+function getContactIdFromPath(path: string): number | null {
+  const match = path.match(/\/company\/contacts\/(\d+)$/);
+  if (!match?.[1]) return null;
+  return Number(match[1]);
+}
+
 // ── Logger ────────────────────────────────────────────────────────────────────
 
 function logRequest(req: HttpRequest, context: InvocationContext, body: string): void {
@@ -129,9 +147,28 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
                                                return { status: 200, headers: h, jsonBody: [createMember(effectiveIdentifier)] };
   if (path.includes('/service/boards') && !path.match(/\/boards\/\d+/))
                                                 return { status: 200, headers: h, jsonBody: MOCK_BOARDS };
+  if (path.match(/\/service\/boards\/\d+$/) && method === 'GET')
+                                               return { status: 200, headers: h, jsonBody: MOCK_BOARDS[0] };
   if (path.match(/\/service\/boards\/\d+\/statuses/))
                                                 return { status: 200, headers: h, jsonBody: MOCK_STATUSES };
+  if (path.match(/\/service\/boards\/\d+\/types\/\d+\/subtypes\/count$/) && method === 'GET')
+                                               return { status: 200, headers: h, jsonBody: { count: MOCK_SUBTYPES.length } };
+  if (path.match(/\/service\/boards\/\d+\/types\/\d+\/subtypes$/) && method === 'GET')
+                                               return { status: 200, headers: h, jsonBody: MOCK_SUBTYPES };
+  if (path.match(/\/service\/boards\/\d+\/types\/count$/) && method === 'GET')
+                                               return { status: 200, headers: h, jsonBody: { count: MOCK_TYPES.length } };
+  if (path.match(/\/service\/boards\/\d+\/types$/) && method === 'GET')
+                                               return { status: 200, headers: h, jsonBody: MOCK_TYPES };
   if (path.includes('/service/priorities'))     return { status: 200, headers: h, jsonBody: MOCK_PRIORITIES };
+  if (path.match(/\/company\/contacts\/count$/) && method === 'GET')
+                                               return { status: 200, headers: h, jsonBody: { count: MOCK_CONTACTS.length } };
+  if (path.includes('/company/contacts') && method === 'GET') {
+    const contactId = getContactIdFromPath(path);
+    if (contactId !== null) {
+      return { status: 200, headers: h, jsonBody: { ...MOCK_CONTACTS[0], id: contactId } };
+    }
+    return { status: 200, headers: h, jsonBody: MOCK_CONTACTS };
+  }
   if (path.match(/\/company\/companies\/count$/) && method === 'GET')
                                                return { status: 200, headers: h, jsonBody: { count: 1 } };
   if (path.includes('/company/companies') && method === 'GET') {
