@@ -7,6 +7,8 @@ const MOCK_SYSTEM_INFO = {
   serverTimeZone: 'Eastern Standard Time', cloudRegion: 'NA', loginUrl: null
 };
 
+const MOCK_COMPANY_INFO_VERSION_NUMBER = 'v4.6.99999';
+
 const MOCK_MEMBER = {
   id: 1, identifier: 'axcient_api', name: 'Axcient Shim API User',
   defaultEmail: 'api@integrid.com', type: { id: 4, name: 'API' },
@@ -104,6 +106,10 @@ function getContactIdFromPath(path: string): number | null {
   return Number(match[1]);
 }
 
+function getLoginCompanyIdFromPath(path: string): string | null {
+  const match = path.match(/\/login\/companyinfo\/([^/]+)$/i);
+  return match?.[1] ?? null;
+}
 // ── Logger ────────────────────────────────────────────────────────────────────
 
 function logRequest(req: HttpRequest, context: InvocationContext, body: string): void {
@@ -129,7 +135,8 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
   const body   = await req.text().catch(() => '');
   logRequest(req, context, body);
 
-  const path   = new URL(req.url).pathname;
+  const parsedUrl = new URL(req.url);
+  const path   = parsedUrl.pathname;
   const method = req.method?.toUpperCase() ?? 'GET';
   const authIdentifier = getAuthIdentifier(req);
   const identifierFromQuery = getIdentifierFromConditions(req);
@@ -137,6 +144,22 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
   const h      = { 'Content-Type': 'application/json' };
 
   if (method === 'OPTIONS') return { status: 200, headers: h, jsonBody: {} };
+  const loginCompanyId = getLoginCompanyIdFromPath(path);
+  if (loginCompanyId && method === 'GET') {
+    return {
+      status: 200,
+      headers: h,
+      jsonBody: {
+        CompanyName: loginCompanyId,
+        Codebase: 'v4_6_release/',
+        VersionCode: 'v4.6',
+        VersionNumber: MOCK_COMPANY_INFO_VERSION_NUMBER,
+        CompanyID: loginCompanyId,
+        IsCloud: true,
+        SiteUrl: parsedUrl.host
+      }
+    };
+  }
 
   if (path.includes('/system/info'))            return { status: 200, headers: h, jsonBody: MOCK_SYSTEM_INFO };
   if (path.includes('/system/members/me'))      return { status: 200, headers: h, jsonBody: createMember(authIdentifier) };
