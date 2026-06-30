@@ -30,18 +30,26 @@ jobs:
           set -euo pipefail
 
           APP_NAME="${AZURE_FUNCTIONAPP_NAME:-}"
+          PUBLISH_PROFILE="${AZURE_FUNCTIONAPP_PUBLISH_PROFILE:-}"
+
+          if [ -z "$PUBLISH_PROFILE" ]; then
+            echo "::error::AZURE_FUNCTIONAPP_PUBLISH_PROFILE secret is missing."
+            exit 1
+          fi
+
+          if ! node -e '
+            const profile = (process.env.AZURE_FUNCTIONAPP_PUBLISH_PROFILE || "").trim();
+            if (!/(?:msdeploySite|siteName)="[^"]+"/i.test(profile)) process.exit(1);
+          '; then
+            echo "::error::AZURE_FUNCTIONAPP_PUBLISH_PROFILE appears malformed."
+            exit 1
+          fi
 
           if [ -z "$APP_NAME" ]; then
-            if [ -z "${AZURE_FUNCTIONAPP_PUBLISH_PROFILE:-}" ]; then
-              echo "::error::AZURE_FUNCTIONAPP_PUBLISH_PROFILE secret is missing."
-              exit 1
-            fi
-
             APP_NAME="$(node -e '
               const profile = (process.env.AZURE_FUNCTIONAPP_PUBLISH_PROFILE || "").trim();
               const match = profile.match(/(?:msdeploySite|siteName)="([^"]+)"/i);
-              if (!match || !match[1]) process.exit(1);
-              process.stdout.write(match[1]);
+              process.stdout.write(match && match[1] ? match[1] : "");
             ')"
 
             if [ -z "$APP_NAME" ]; then
