@@ -118,7 +118,6 @@ jobs:
             fi
             exit 1
           fi
-
       - name: Create deployment package
         run: |
           set -euo pipefail
