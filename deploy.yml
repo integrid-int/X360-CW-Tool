@@ -21,11 +21,66 @@ jobs:
           npm ci
           npm run build
 
+      - name: Resolve Function App name
+        id: resolve_app_name
+        env:
+          AZURE_FUNCTIONAPP_NAME: ${{ secrets.AZURE_FUNCTIONAPP_NAME }}
+          AZURE_FUNCTIONAPP_PUBLISH_PROFILE: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
+        run: |
+          set -euo pipefail
+
+          APP_NAME="${AZURE_FUNCTIONAPP_NAME:-}"
+          PUBLISH_PROFILE="${AZURE_FUNCTIONAPP_PUBLISH_PROFILE:-}"
+
+          if [ -z "$PUBLISH_PROFILE" ]; then
+            echo "::error::AZURE_FUNCTIONAPP_PUBLISH_PROFILE secret is missing."
+            exit 1
+          fi
+
+          if ! node -e '
+            const profile = (process.env.AZURE_FUNCTIONAPP_PUBLISH_PROFILE || "").trim();
+            if (!/(?:msdeploySite|siteName)="[^"]+"/i.test(profile)) process.exit(1);
+          '; then
+            echo "::error::AZURE_FUNCTIONAPP_PUBLISH_PROFILE appears malformed."
+            exit 1
+          fi
+
+          if [ -z "$APP_NAME" ]; then
+            APP_NAME="$(node -e '
+              const profile = (process.env.AZURE_FUNCTIONAPP_PUBLISH_PROFILE || "").trim();
+              const match = profile.match(/(?:msdeploySite|siteName)="([^"]+)"/i);
+              process.stdout.write(match && match[1] ? match[1] : "");
+            ')"
+
+            if [ -z "$APP_NAME" ]; then
+              echo "::error::Unable to derive Function App name from AZURE_FUNCTIONAPP_PUBLISH_PROFILE."
+              exit 1
+            fi
+          fi
+
+          echo "app_name=$APP_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Create deployment package
+        run: |
+          set -euo pipefail
+
+          PACKAGE_DIR=".azure-functions-package"
+          rm -rf "$PACKAGE_DIR"
+          mkdir -p "$PACKAGE_DIR"
+
+          cp host.json package.json package-lock.json "$PACKAGE_DIR"/
+          cp -R dist node_modules "$PACKAGE_DIR"/
+
+          test -f "$PACKAGE_DIR/host.json"
+          test -f "$PACKAGE_DIR/package.json"
+          compgen -G "$PACKAGE_DIR/dist/functions/*.js" > /dev/null
+          test -d "$PACKAGE_DIR/node_modules/@azure/functions"
+
       - name: Deploy to Azure Functions
         uses: Azure/functions-action@v1
         with:
-          app-name: ${{ secrets.AZURE_FUNCTIONAPP_NAME }}
-          package: '.'
+          app-name: ${{ steps.resolve_app_name.outputs.app_name }}
+          package: '.azure-functions-package'
           publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
-          respect-funcignore: true
+          respect-funcignore: false
           scm-do-build-during-deployment: false
