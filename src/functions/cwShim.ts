@@ -1,4 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
+import { createHaloClientFromEnv } from '../lib/haloClient';
 
 // ── Mock CW responses ─────────────────────────────────────────────────────────
 
@@ -95,6 +96,199 @@ const CUSTOMER_COMPANIES = [
   { id: 104, name: 'The Law Office Of Ben C Morgan', identifier: '104' }
 ];
 const CREATED_TICKETS = new Map<number, Record<string, unknown>>();
+const haloClosedStatusRaw = process.env.HaloClosedStatusId;
+const HALO_CLOSED_STATUS_ID = Number(
+  typeof haloClosedStatusRaw === 'string' && haloClosedStatusRaw.trim().length > 0
+    ? haloClosedStatusRaw
+    : '9'
+) || 9;
+const haloClient = createHaloClientFromEnv();
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function getValueString(record: Record<string, unknown>, ...keys: string[]): string | null {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value !== 'string') continue;
+    const trimmed = value.trim();
+    if (trimmed.length > 0) return trimmed;
+  }
+  return null;
+}
+
+function getValueNumber(record: Record<string, unknown>, ...keys: string[]): number | null {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim().length > 0) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return null;
+}
+
+function getValueBoolean(record: Record<string, unknown>, ...keys: string[]): boolean | null {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'string') {
+      if (value.toLowerCase() === 'true') return true;
+      if (value.toLowerCase() === 'false') return false;
+    }
+  }
+  return null;
+}
+
+function mapHaloClientToCompany(client: Record<string, unknown>): Record<string, unknown> {
+  const id = getValueNumber(client, 'id', 'client_id') ?? 1;
+  const name = getValueString(client, 'name', 'client_name') ?? `Client ${id}`;
+  return {
+    ...MOCK_COMPANIES[0],
+    id,
+    identifier: String(id),
+    name
+  };
+}
+
+function mapHaloUserToContact(user: Record<string, unknown>): Record<string, unknown> {
+  const id = getValueNumber(user, 'id', 'user_id') ?? 1;
+  const firstName = getValueString(user, 'firstname', 'first_name') ?? '';
+  const lastName = getValueString(user, 'surname', 'last_name') ?? '';
+  const explicitName = getValueString(user, 'name', 'displayname');
+  const fallbackName = `${firstName} ${lastName}`.trim();
+  const fullName = explicitName !== null ? explicitName : (fallbackName || `Contact ${id}`);
+  return {
+    id,
+    firstName,
+    lastName,
+    name: fullName
+  };
+}
+
+function mapHaloTeamToBoard(team: Record<string, unknown>): Record<string, unknown> {
+  const id = getValueNumber(team, 'id', 'team_id') ?? 1;
+  const name = getValueString(team, 'name', 'team') ?? `Board ${id}`;
+  return {
+    id,
+    name,
+    locationId: 1,
+    businessUnitId: 1,
+    inactive: getValueBoolean(team, 'inactive', 'isdisabled') ?? false
+  };
+}
+
+function mapHaloTypeToType(ticketType: Record<string, unknown>): Record<string, unknown> {
+  const id = getValueNumber(ticketType, 'id', 'tickettype_id') ?? 1;
+  const teamId = getValueNumber(ticketType, 'team_id', 'board_id') ?? 1;
+  const name = getValueString(ticketType, 'name', 'tickettypename') ?? `Type ${id}`;
+  return {
+    id,
+    name,
+    boardId: teamId,
+    inactiveFlag: getValueBoolean(ticketType, 'inactive', 'inactiveflag') ?? false
+  };
+}
+
+function mapHaloStatusToStatus(status: Record<string, unknown>): Record<string, unknown> {
+  const id = getValueNumber(status, 'id', 'status_id') ?? 1;
+  const name = getValueString(status, 'name', 'status_name') ?? `Status ${id}`;
+  const statusType = (getValueString(status, 'status_type', 'type') ?? '').toLowerCase();
+  const inferredClosed = statusType.includes('closed') || name.toLowerCase().includes('closed') || name.toLowerCase().includes('resolved');
+  return {
+    id,
+    boardId: 1,
+    name,
+    sortOrder: getValueNumber(status, 'sortorder', 'order') ?? id,
+    closedStatus: id === HALO_CLOSED_STATUS_ID || inferredClosed
+  };
+}
+
+function mapHaloPriorityToPriority(priority: Record<string, unknown>): Record<string, unknown> {
+  const id = getValueNumber(priority, 'id', 'priority_id') ?? 1;
+  const name = getValueString(priority, 'name', 'priority_name') ?? `Priority ${id}`;
+  return {
+    id,
+    name,
+    sortOrder: getValueNumber(priority, 'sortorder', 'order') ?? id
+  };
+}
+
+function mapHaloTicketToConnectWise(ticket: Record<string, unknown>, fallbackIdentifier: string): Record<string, unknown> {
+  const id = getValueNumber(ticket, 'id', 'ticket_id') ?? Math.floor(Math.random() * 90000) + 10000;
+  const companyId = getValueNumber(ticket, 'client_id') ?? 1;
+  const companyName = getValueString(ticket, 'client_name') ?? `Client ${companyId}`;
+  const company = resolveCompanyFromIdentifier(String(companyId), fallbackIdentifier);
+  if (typeof company.name === 'string' && company.name.startsWith('Customer')) {
+    company.name = companyName;
+    company.identifier = String(companyId);
+    company.id = companyId;
+  }
+
+  return {
+    id,
+    summary: getValueString(ticket, 'summary', 'title') ?? 'Shim ticket',
+    initialDescription: getValueString(ticket, 'details', 'description') ?? '',
+    status: {
+      id: getValueNumber(ticket, 'status_id') ?? 1,
+      name: getValueString(ticket, 'status_name', 'status') ?? 'New'
+    },
+    board: {
+      id: getValueNumber(ticket, 'team_id', 'board_id') ?? 1,
+      name: getValueString(ticket, 'team', 'board_name') ?? 'Service Desk'
+    },
+    company,
+    contact: {
+      id: getValueNumber(ticket, 'user_id', 'contact_id') ?? 1,
+      name: getValueString(ticket, 'user_name', 'contact_name') ?? MOCK_CONTACTS[0].name
+    },
+    type: {
+      id: getValueNumber(ticket, 'tickettype_id', 'type_id') ?? 1,
+      name: getValueString(ticket, 'tickettype_name', 'type_name') ?? 'General'
+    },
+    requiredDate: getValueString(ticket, 'dateoccurred', 'required_date') ?? new Date().toISOString(),
+    _info: {
+      lastUpdated: getValueString(ticket, 'lastactiondate', 'dateupdated') ?? new Date().toISOString()
+    }
+  };
+}
+
+function extractTicketId(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function getTicketIdFromPayload(payload: Record<string, unknown>): number | null {
+  const direct = extractTicketId(payload.ticketid ?? payload.ticketId ?? payload.id);
+  if (direct !== null) return direct;
+
+  const ticket = asRecord(payload.ticket);
+  if (ticket) {
+    const nested = extractTicketId(ticket.id ?? ticket.ticketid ?? ticket.ticketId);
+    if (nested !== null) return nested;
+  }
+  return null;
+}
+
+function payloadLooksResolved(payload: Record<string, unknown>): boolean {
+  const boolChecks = [payload.resolved, payload.isResolved, payload.closed, payload.isClosed];
+  for (const value of boolChecks) {
+    if (value === true) return true;
+  }
+  const statusCandidate = typeof payload.status === 'string'
+    ? payload.status
+    : getValueString(asRecord(payload.status) ?? {}, 'name', 'status');
+  if (!statusCandidate) return false;
+  const lower = statusCandidate.toLowerCase();
+  return lower.includes('resolve') || lower.includes('closed');
+}
 
 function getAuthIdentifier(req: HttpRequest): string {
   const authHeader = req.headers.get('authorization') ?? '';
@@ -122,6 +316,14 @@ function parseConditionNumber(conditions: string, field: string): number | null 
   if (!value) return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseConditionBoolean(conditions: string, field: string): boolean | null {
+  const value = parseConditionValue(conditions, field);
+  if (!value) return null;
+  if (value.toLowerCase() === 'true') return true;
+  if (value.toLowerCase() === 'false') return false;
+  return null;
 }
 
 function getIdentifierFromConditions(req: HttpRequest): string | null {
@@ -220,6 +422,26 @@ function applyPatchOperations(base: Record<string, unknown>, operations: unknown
   return output;
 }
 
+function filterStatuses(conditions: string, sourceStatuses: Record<string, unknown>[] = MOCK_STATUSES) {
+  let statuses = [...sourceStatuses];
+  const id = parseConditionNumber(conditions, 'id');
+  if (id !== null) statuses = statuses.filter((status) => status.id === id);
+  const name = parseConditionValue(conditions, 'name');
+  if (name) statuses = statuses.filter((status) => typeof status.name === 'string' && status.name.toLowerCase() === name.toLowerCase());
+  const closedStatus = parseConditionBoolean(conditions, 'closedStatus');
+  if (closedStatus !== null) statuses = statuses.filter((status) => status.closedStatus === closedStatus);
+  return statuses;
+}
+
+function filterPriorities(conditions: string, sourcePriorities: Record<string, unknown>[] = MOCK_PRIORITIES) {
+  let priorities = [...sourcePriorities];
+  const id = parseConditionNumber(conditions, 'id');
+  if (id !== null) priorities = priorities.filter((priority) => priority.id === id);
+  const name = parseConditionValue(conditions, 'name');
+  if (name) priorities = priorities.filter((priority) => typeof priority.name === 'string' && priority.name.toLowerCase() === name.toLowerCase());
+  return priorities;
+}
+
 function getContactIdFromPath(path: string): number | null {
   const match = path.match(/\/company\/contacts\/(\d+)$/);
   if (!match?.[1]) return null;
@@ -229,6 +451,68 @@ function getContactIdFromPath(path: string): number | null {
 function getLoginCompanyIdFromPath(path: string): string | null {
   const match = path.match(/\/login\/companyinfo\/([^/]+)$/i);
   return match?.[1] ?? null;
+}
+
+function getTypeIdFromSubtypePath(path: string): number | null {
+  const match = path.match(/\/service\/boards\/\d+\/types\/(\d+)\/subtypes/);
+  if (!match?.[1]) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getBoardIdFromPath(path: string): number | null {
+  const match = path.match(/\/service\/boards\/(\d+)/);
+  if (!match?.[1]) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+async function getHaloCompanies(context: InvocationContext): Promise<Record<string, unknown>[]> {
+  if (!haloClient) return CUSTOMER_COMPANIES.map((c) => createCompany(c.identifier, c.id));
+  const clients = await haloClient.listClients();
+  const mapped = clients.map(mapHaloClientToCompany);
+  context.log(`HALO_COMPANIES count=${mapped.length}`);
+  return mapped;
+}
+
+async function getHaloContacts(context: InvocationContext, clientId?: number): Promise<Record<string, unknown>[]> {
+  if (!haloClient) return [...MOCK_CONTACTS];
+  const users = await haloClient.listUsers(clientId);
+  const mapped = users.map(mapHaloUserToContact);
+  context.log(`HALO_CONTACTS count=${mapped.length}`);
+  return mapped;
+}
+
+async function getHaloBoards(context: InvocationContext): Promise<Record<string, unknown>[]> {
+  if (!haloClient) return [...MOCK_BOARDS];
+  const teams = await haloClient.listTeams();
+  const mapped = teams.map(mapHaloTeamToBoard);
+  context.log(`HALO_BOARDS count=${mapped.length}`);
+  return mapped;
+}
+
+async function getHaloTypes(context: InvocationContext): Promise<Record<string, unknown>[]> {
+  if (!haloClient) return [...MOCK_TYPES];
+  const types = await haloClient.listTicketTypes();
+  const mapped = types.map(mapHaloTypeToType);
+  context.log(`HALO_TYPES count=${mapped.length}`);
+  return mapped;
+}
+
+async function getHaloStatuses(context: InvocationContext): Promise<Record<string, unknown>[]> {
+  if (!haloClient) return [...MOCK_STATUSES];
+  const statuses = await haloClient.listStatuses();
+  const mapped = statuses.map(mapHaloStatusToStatus);
+  context.log(`HALO_STATUSES count=${mapped.length}`);
+  return mapped;
+}
+
+async function getHaloPriorities(context: InvocationContext): Promise<Record<string, unknown>[]> {
+  if (!haloClient) return [...MOCK_PRIORITIES];
+  const priorities = await haloClient.listPriorities();
+  const mapped = priorities.map(mapHaloPriorityToPriority);
+  context.log(`HALO_PRIORITIES count=${mapped.length}`);
+  return mapped;
 }
 // ── Logger ────────────────────────────────────────────────────────────────────
 
@@ -281,110 +565,270 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
     };
   }
 
-  if (path.includes('/system/info'))            return { status: 200, headers: h, jsonBody: MOCK_SYSTEM_INFO };
-  if (path.includes('/system/members/me'))      return { status: 200, headers: h, jsonBody: createMember(authIdentifier) };
-  if (path.match(/\/system\/members\/count$/) && method === 'GET')
-                                               return { status: 200, headers: h, jsonBody: { count: 1 } };
-  if (path.match(/\/system\/members\/\d+$/))    return { status: 200, headers: h, jsonBody: createMember(effectiveIdentifier) };
-  if (path.includes('/system/members') && method === 'GET')
-                                               return { status: 200, headers: h, jsonBody: [createMember(effectiveIdentifier)] };
-  if (path.includes('/service/boards') && !path.match(/\/boards\/\d+/))
-                                                return { status: 200, headers: h, jsonBody: MOCK_BOARDS };
-  if (path.match(/\/service\/boards\/\d+$/) && method === 'GET')
-                                               return { status: 200, headers: h, jsonBody: MOCK_BOARDS[0] };
-  if (path.match(/\/service\/boards\/\d+\/statuses/))
-                                                return { status: 200, headers: h, jsonBody: MOCK_STATUSES };
-  if (path.match(/\/service\/boards\/\d+\/types\/\d+\/subtypes\/count$/) && method === 'GET')
-                                               return { status: 200, headers: h, jsonBody: { count: MOCK_SUBTYPES.length } };
-  if (path.match(/\/service\/boards\/\d+\/types\/\d+\/subtypes$/) && method === 'GET')
-                                               return { status: 200, headers: h, jsonBody: MOCK_SUBTYPES };
-  if (path.match(/\/service\/boards\/\d+\/types\/count$/) && method === 'GET')
-                                               return { status: 200, headers: h, jsonBody: { count: MOCK_TYPES.length } };
-  if (path.match(/\/service\/boards\/\d+\/types$/) && method === 'GET')
-                                               return { status: 200, headers: h, jsonBody: MOCK_TYPES };
-  if (path.includes('/service/priorities'))     return { status: 200, headers: h, jsonBody: MOCK_PRIORITIES };
-  if (path.match(/\/company\/contacts\/count$/) && method === 'GET')
-                                               return { status: 200, headers: h, jsonBody: { count: MOCK_CONTACTS.length } };
-  if (path.includes('/company/contacts') && method === 'GET') {
-    const contactId = getContactIdFromPath(path);
-    if (contactId !== null) {
-      return { status: 200, headers: h, jsonBody: { ...MOCK_CONTACTS[0], id: contactId } };
+  try {
+    if (path.includes('/system/info'))            return { status: 200, headers: h, jsonBody: MOCK_SYSTEM_INFO };
+    if (path.includes('/system/members/me'))      return { status: 200, headers: h, jsonBody: createMember(authIdentifier) };
+    if (path.match(/\/system\/members\/count$/) && method === 'GET')
+                                                 return { status: 200, headers: h, jsonBody: { count: 1 } };
+    if (path.match(/\/system\/members\/\d+$/))    return { status: 200, headers: h, jsonBody: createMember(effectiveIdentifier) };
+    if (path.includes('/system/members') && method === 'GET')
+                                                 return { status: 200, headers: h, jsonBody: [createMember(effectiveIdentifier)] };
+    if (path.includes('/service/boards') && !path.match(/\/boards\/\d+/)) {
+      const boards = await getHaloBoards(context);
+      return { status: 200, headers: h, jsonBody: boards };
     }
-    return { status: 200, headers: h, jsonBody: MOCK_CONTACTS };
-  }
-  if (path.match(/\/company\/companies\/count$/) && method === 'GET')
-                                               return { status: 200, headers: h, jsonBody: { count: CUSTOMER_COMPANIES.length } };
-  if (path.includes('/company/companies') && method === 'GET') {
-    const companyIdFromConditions = getCompanyIdFromConditions(req);
-    const companyIdFromPath = getCompanyIdFromPath(path);
-    const companyId = companyIdFromPath ?? companyIdFromConditions ?? 1;
-    if (companyIdFromPath !== null) {
-      return { status: 200, headers: h, jsonBody: createCompany(effectiveIdentifier, companyId) };
+    if (path.match(/\/service\/boards\/\d+$/) && method === 'GET') {
+      const boardId = getBoardIdFromPath(path) ?? 1;
+      const boards = await getHaloBoards(context);
+      const board = boards.find((candidate) => candidate.id === boardId) ?? boards[0] ?? MOCK_BOARDS[0];
+      return { status: 200, headers: h, jsonBody: board };
     }
-    if (companyIdFromConditions === null) {
-      return { status: 200, headers: h, jsonBody: CUSTOMER_COMPANIES.map((c) => createCompany(c.identifier, c.id)) };
+    if (path.match(/\/service\/boards\/\d+\/statuses/)) {
+      const conditions = req.query.get('conditions') ?? '';
+      const statuses = await getHaloStatuses(context);
+      return { status: 200, headers: h, jsonBody: filterStatuses(conditions, statuses) };
     }
-    return { status: 200, headers: h, jsonBody: [createCompany(effectiveIdentifier, companyId)] };
-  }
+    if (path.match(/\/service\/boards\/\d+\/types\/\d+\/subtypes\/count$/) && method === 'GET') {
+      const typeId = getTypeIdFromSubtypePath(path);
+      if (typeId === null) return { status: 200, headers: h, jsonBody: { count: 0 } };
+      const subtypes = [{ id: typeId, name: 'Default', boardId: 1, typeId, inactiveFlag: false }];
+      return { status: 200, headers: h, jsonBody: { count: subtypes.length } };
+    }
+    if (path.match(/\/service\/boards\/\d+\/types\/\d+\/subtypes$/) && method === 'GET') {
+      const typeId = getTypeIdFromSubtypePath(path);
+      if (typeId === null) return { status: 200, headers: h, jsonBody: [] };
+      return {
+        status: 200,
+        headers: h,
+        jsonBody: [{ id: typeId, name: 'Default', boardId: 1, typeId, inactiveFlag: false }]
+      };
+    }
+    if (path.match(/\/service\/boards\/\d+\/types\/count$/) && method === 'GET') {
+      const types = await getHaloTypes(context);
+      return { status: 200, headers: h, jsonBody: { count: types.length } };
+    }
+    if (path.match(/\/service\/boards\/\d+\/types$/) && method === 'GET') {
+      const types = await getHaloTypes(context);
+      return { status: 200, headers: h, jsonBody: types };
+    }
+    if (path.includes('/service/priorities')) {
+      const conditions = req.query.get('conditions') ?? '';
+      const priorities = await getHaloPriorities(context);
+      return { status: 200, headers: h, jsonBody: filterPriorities(conditions, priorities) };
+    }
+    if (path.match(/\/company\/contacts\/count$/) && method === 'GET') {
+      const contacts = await getHaloContacts(context);
+      return { status: 200, headers: h, jsonBody: { count: contacts.length } };
+    }
+    if (path.includes('/company/contacts') && method === 'GET') {
+      const conditions = req.query.get('conditions') ?? '';
+      const requestedCompanyId = parseConditionNumber(conditions, 'company/id') ?? parseConditionNumber(conditions, 'company.id');
+      let contacts = await getHaloContacts(context, requestedCompanyId ?? undefined);
+      const contactIdFromConditions = parseConditionNumber(conditions, 'id');
+      const contactNameFromConditions = parseConditionValue(conditions, 'name');
+      if (contactIdFromConditions !== null) contacts = contacts.filter((contact) => contact.id === contactIdFromConditions);
+      if (contactNameFromConditions) {
+        contacts = contacts.filter((contact) => typeof contact.name === 'string' && contact.name.toLowerCase() === contactNameFromConditions.toLowerCase());
+      }
 
-  if (path.includes('/service/tickets') && method === 'POST') {
-    let parsed: Record<string, unknown> = {};
-    try { parsed = JSON.parse(body); } catch {}
-    const fakeId = Math.floor(Math.random() * 90000) + 10000;
-    const companyIdentifier = getNestedString(parsed, 'company', 'identifier')
-      ?? getNestedString(parsed, 'company', 'id');
-    const company = resolveCompanyFromIdentifier(companyIdentifier, effectiveIdentifier);
-    const boardName = getNestedString(parsed, 'board', 'name') ?? 'Service Desk';
-    const typeName = getNestedString(parsed, 'type', 'name') ?? 'General';
-    const contactId = getNestedNumber(parsed, 'contact', 'id') ?? 1;
-    const summary = typeof parsed.summary === 'string' && parsed.summary.trim().length > 0
-      ? parsed.summary
-      : 'Shim ticket';
-    const requiredDate = typeof parsed.requiredDate === 'string' ? parsed.requiredDate : new Date().toISOString();
+      const contactId = getContactIdFromPath(path);
+      if (contactId !== null) {
+        const contact = contacts.find((candidate) => candidate.id === contactId) ?? contacts[0] ?? { ...MOCK_CONTACTS[0], id: contactId };
+        return { status: 200, headers: h, jsonBody: contact };
+      }
+      return { status: 200, headers: h, jsonBody: contacts };
+    }
+    if (path.match(/\/company\/companies\/count$/) && method === 'GET') {
+      const companies = await getHaloCompanies(context);
+      return { status: 200, headers: h, jsonBody: { count: companies.length } };
+    }
+    if (path.includes('/company/companies') && method === 'GET') {
+      const companies = await getHaloCompanies(context);
+      const conditions = req.query.get('conditions') ?? '';
+      const companyIdFromPath = getCompanyIdFromPath(path);
+      if (companyIdFromPath !== null) {
+        const company = companies.find((candidate) => candidate.id === companyIdFromPath)
+          ?? createCompany(effectiveIdentifier, companyIdFromPath);
+        return { status: 200, headers: h, jsonBody: company };
+      }
 
-    const ticket = {
-      id: fakeId,
-      summary,
-      initialDescription: typeof parsed.initialDescription === 'string' ? parsed.initialDescription : '',
-      status: { id: 1, name: 'New' },
-      board: { id: 1, name: boardName },
-      company,
-      contact: { id: contactId, name: MOCK_CONTACTS[0].name },
-      type: { id: 1, name: typeName },
-      requiredDate,
-      _info: { lastUpdated: new Date().toISOString() }
-    };
-    CREATED_TICKETS.set(fakeId, ticket);
-    context.log(`TICKET_CREATE fake_id=${fakeId}`, JSON.stringify(parsed));
+      const companyIdFromConditions = getCompanyIdFromConditions(req);
+      const companyNameFromConditions = parseConditionValue(conditions, 'name');
+      if (companyIdFromConditions === null && !companyNameFromConditions) {
+        return { status: 200, headers: h, jsonBody: companies };
+      }
+
+      const filtered = companies.filter((company) => {
+        if (companyIdFromConditions !== null) return company.id === companyIdFromConditions;
+        if (!companyNameFromConditions) return true;
+        return typeof company.name === 'string' && company.name.toLowerCase() === companyNameFromConditions.toLowerCase();
+      });
+      if (filtered.length === 0 && companyIdFromConditions !== null) {
+        return { status: 200, headers: h, jsonBody: [createCompany(effectiveIdentifier, companyIdFromConditions)] };
+      }
+      return { status: 200, headers: h, jsonBody: filtered };
+    }
+
+    if (path.includes('/service/tickets') && method === 'POST') {
+      let parsedUnknown: unknown = {};
+      try { parsedUnknown = JSON.parse(body); } catch {}
+      const parsed = asRecord(parsedUnknown) ?? {};
+
+      if (haloClient) {
+        const ticketIdFromPayload = getTicketIdFromPayload(parsed);
+        if (ticketIdFromPayload !== null && payloadLooksResolved(parsed)) {
+          const closedTicket = await haloClient.closeTicket(ticketIdFromPayload, 'Closed from Axcient resolved alert.');
+          const closedResponse = mapHaloTicketToConnectWise(closedTicket, effectiveIdentifier);
+          CREATED_TICKETS.set(ticketIdFromPayload, closedResponse);
+          return { status: 200, headers: h, jsonBody: closedResponse };
+        }
+
+        const [companies, boards, types, priorities] = await Promise.all([
+          getHaloCompanies(context),
+          getHaloBoards(context),
+          getHaloTypes(context),
+          getHaloPriorities(context)
+        ]);
+
+        const companyIdentifier = getNestedString(parsed, 'company', 'identifier')
+          ?? getNestedString(parsed, 'company', 'id')
+          ?? getNestedString(parsed, 'company', 'name');
+        const boardName = getNestedString(parsed, 'board', 'name') ?? 'Service Desk';
+        const typeName = getNestedString(parsed, 'type', 'name') ?? 'General';
+        const priorityName = getNestedString(parsed, 'priority', 'name');
+        const contactId = getNestedNumber(parsed, 'contact', 'id');
+        const summary = typeof parsed.summary === 'string' && parsed.summary.trim().length > 0
+          ? parsed.summary
+          : 'Shim ticket';
+        const initialDescription = typeof parsed.initialDescription === 'string' ? parsed.initialDescription : '';
+
+        const companyFromName = companies.find((company) => {
+          if (!companyIdentifier) return false;
+          const normalized = companyIdentifier.toLowerCase();
+          return String(company.identifier ?? '').toLowerCase() === normalized
+            || String(company.name ?? '').toLowerCase() === normalized
+            || String(company.id ?? '') === companyIdentifier;
+        });
+        const resolvedCompanyId = companyFromName ? Number(companyFromName.id) : Number(companyIdentifier);
+        const resolvedBoard = boards.find((board) => String(board.name).toLowerCase() === boardName.toLowerCase());
+        const resolvedType = types.find((type) => String(type.name).toLowerCase() === typeName.toLowerCase());
+        const resolvedPriority = priorities.find((priority) => {
+          if (!priorityName) return false;
+          return String(priority.name).toLowerCase() === priorityName.toLowerCase();
+        });
+
+        const haloCreatePayload: Record<string, unknown> = {
+          summary,
+          details: initialDescription
+        };
+        if (Number.isFinite(resolvedCompanyId)) haloCreatePayload.client_id = resolvedCompanyId;
+        if (resolvedBoard?.id) haloCreatePayload.team_id = resolvedBoard.id;
+        if (resolvedType?.id) haloCreatePayload.tickettype_id = resolvedType.id;
+        if (resolvedPriority?.id) haloCreatePayload.priority_id = resolvedPriority.id;
+        if (contactId !== null) haloCreatePayload.user_id = contactId;
+
+        const createdTicket = await haloClient.createTicket(haloCreatePayload);
+        const mappedTicket = mapHaloTicketToConnectWise(createdTicket, effectiveIdentifier);
+        const mappedTicketId = extractTicketId(mappedTicket.id) ?? Math.floor(Math.random() * 90000) + 10000;
+        CREATED_TICKETS.set(mappedTicketId, mappedTicket);
+        context.log(`TICKET_CREATE halo_id=${mappedTicketId}`, JSON.stringify(haloCreatePayload));
+        return {
+          status: 201,
+          headers: h,
+          jsonBody: mappedTicket
+        };
+      }
+
+      const fakeId = Math.floor(Math.random() * 90000) + 10000;
+      const companyIdentifier = getNestedString(parsed, 'company', 'identifier')
+        ?? getNestedString(parsed, 'company', 'id');
+      const company = resolveCompanyFromIdentifier(companyIdentifier, effectiveIdentifier);
+      const boardName = getNestedString(parsed, 'board', 'name') ?? 'Service Desk';
+      const typeName = getNestedString(parsed, 'type', 'name') ?? 'General';
+      const contactId = getNestedNumber(parsed, 'contact', 'id') ?? 1;
+      const summary = typeof parsed.summary === 'string' && parsed.summary.trim().length > 0
+        ? parsed.summary
+        : 'Shim ticket';
+      const requiredDate = typeof parsed.requiredDate === 'string' ? parsed.requiredDate : new Date().toISOString();
+
+      const ticket = {
+        id: fakeId,
+        summary,
+        initialDescription: typeof parsed.initialDescription === 'string' ? parsed.initialDescription : '',
+        status: { id: 1, name: 'New' },
+        board: { id: 1, name: boardName },
+        company,
+        contact: { id: contactId, name: MOCK_CONTACTS[0].name },
+        type: { id: 1, name: typeName },
+        requiredDate,
+        _info: { lastUpdated: new Date().toISOString() }
+      };
+      CREATED_TICKETS.set(fakeId, ticket);
+      context.log(`TICKET_CREATE fake_id=${fakeId}`, JSON.stringify(parsed));
+      return {
+        status: 201, headers: h,
+        jsonBody: ticket
+      };
+    }
+
+    if (path.match(/\/service\/tickets\/\d+/) && (method === 'PUT' || method === 'PATCH')) {
+      const ticketId = path.match(/\/tickets\/(\d+)/)?.[1];
+      let parsed: Record<string, unknown> | unknown[] = {};
+      try { parsed = JSON.parse(body); } catch {}
+      const numericTicketId = Number(ticketId);
+
+      if (haloClient) {
+        const closeNote = 'Closed from Axcient resolved alert.';
+        const closedTicket = await haloClient.closeTicket(numericTicketId, closeNote);
+        const mappedTicket = mapHaloTicketToConnectWise(closedTicket, effectiveIdentifier);
+        CREATED_TICKETS.set(numericTicketId, mappedTicket);
+        context.log(`TICKET_CLOSE halo_id=${ticketId}`, JSON.stringify(parsed));
+        return { status: 200, headers: h, jsonBody: mappedTicket };
+      }
+
+      const base = CREATED_TICKETS.get(numericTicketId) ?? { id: numericTicketId, status: { id: 1, name: 'New' } };
+      const updated = Array.isArray(parsed)
+        ? applyPatchOperations(base, parsed)
+        : { ...base, ...parsed };
+      CREATED_TICKETS.set(numericTicketId, updated);
+      context.log(`TICKET_UPDATE id=${ticketId}`, JSON.stringify(parsed));
+      return { status: 200, headers: h, jsonBody: updated };
+    }
+
+    if (path.match(/\/service\/tickets\/\d+/) && method === 'GET') {
+      const ticketId = Number(path.match(/\/tickets\/(\d+)/)?.[1]);
+      if (haloClient) {
+        const ticket = await haloClient.getTicket(ticketId);
+        const mappedTicket = mapHaloTicketToConnectWise(ticket, effectiveIdentifier);
+        CREATED_TICKETS.set(ticketId, mappedTicket);
+        return { status: 200, headers: h, jsonBody: mappedTicket };
+      }
+      const ticket = CREATED_TICKETS.get(ticketId);
+      if (ticket) return { status: 200, headers: h, jsonBody: ticket };
+      return { status: 200, headers: h, jsonBody: { id: ticketId, status: { id: 1, name: 'New' } } };
+    }
+
+    if (path.includes('/service/tickets') && method === 'GET') {
+      if (!haloClient) return { status: 200, headers: h, jsonBody: Array.from(CREATED_TICKETS.values()) };
+
+      const cachedIds = Array.from(CREATED_TICKETS.keys());
+      if (cachedIds.length === 0) return { status: 200, headers: h, jsonBody: [] };
+      const haloTickets = await haloClient.listTickets(cachedIds);
+      const mapped = haloTickets.map((ticket) => mapHaloTicketToConnectWise(ticket, effectiveIdentifier));
+      return { status: 200, headers: h, jsonBody: mapped };
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    context.error(`HALO_UPSTREAM_ERROR ${errorMessage}`);
     return {
-      status: 201, headers: h,
-      jsonBody: ticket
+      status: 502,
+      headers: h,
+      jsonBody: {
+        error: 'Halo upstream request failed.',
+        detail: errorMessage
+      }
     };
   }
-
-  if (path.match(/\/service\/tickets\/\d+/) && (method === 'PUT' || method === 'PATCH')) {
-    const ticketId = path.match(/\/tickets\/(\d+)/)?.[1];
-    let parsed: Record<string, unknown> | unknown[] = {};
-    try { parsed = JSON.parse(body); } catch {}
-    const numericTicketId = Number(ticketId);
-    const base = CREATED_TICKETS.get(numericTicketId) ?? { id: numericTicketId, status: { id: 1, name: 'New' } };
-    const updated = Array.isArray(parsed)
-      ? applyPatchOperations(base, parsed)
-      : { ...base, ...parsed };
-    CREATED_TICKETS.set(numericTicketId, updated);
-    context.log(`TICKET_UPDATE id=${ticketId}`, JSON.stringify(parsed));
-    return { status: 200, headers: h, jsonBody: updated };
-  }
-
-  if (path.match(/\/service\/tickets\/\d+/) && method === 'GET') {
-    const ticketId = Number(path.match(/\/tickets\/(\d+)/)?.[1]);
-    const ticket = CREATED_TICKETS.get(ticketId);
-    if (ticket) return { status: 200, headers: h, jsonBody: ticket };
-    return { status: 200, headers: h, jsonBody: { id: ticketId, status: { id: 1, name: 'New' } } };
-  }
-
-  if (path.includes('/service/tickets') && method === 'GET')
-                                               return { status: 200, headers: h, jsonBody: Array.from(CREATED_TICKETS.values()) };
 
   context.log(`UNHANDLED ${method} ${path}`);
   return { status: 200, headers: h, jsonBody: [] };
