@@ -110,6 +110,17 @@ test('service board subtypes endpoint returns non-empty list', async () => {
   assert.ok(res.jsonBody.length > 0);
 });
 
+test('closed status dropdown query returns only closed statuses', async () => {
+  const { cwShim } = require('../dist/functions/cwShim.js');
+  const req = makeRequest('https://example.com/v4_6_release/apis/3.0/service/boards/1/statuses?conditions=closedStatus=true');
+  const res = await cwShim(req, context);
+
+  assert.equal(res.status, 200);
+  assert.ok(Array.isArray(res.jsonBody));
+  assert.ok(res.jsonBody.length > 0);
+  assert.ok(res.jsonBody.every((s) => s.closedStatus === true));
+});
+
 test('company contacts endpoint returns non-empty list', async () => {
   const { cwShim } = require('../dist/functions/cwShim.js');
   const req = makeRequest('https://example.com/v4_6_release/apis/3.0/company/contacts');
@@ -118,6 +129,39 @@ test('company contacts endpoint returns non-empty list', async () => {
   assert.equal(res.status, 200);
   assert.ok(Array.isArray(res.jsonBody));
   assert.ok(res.jsonBody.length > 0);
+});
+
+test('contact dropdown query supports id filter conditions', async () => {
+  const { cwShim } = require('../dist/functions/cwShim.js');
+  const req = makeRequest('https://example.com/v4_6_release/apis/3.0/company/contacts?conditions=id=1');
+  const res = await cwShim(req, context);
+
+  assert.equal(res.status, 200);
+  assert.ok(Array.isArray(res.jsonBody));
+  assert.equal(res.jsonBody.length, 1);
+  assert.equal(res.jsonBody[0].id, 1);
+});
+
+test('service board dropdown query supports name filter conditions', async () => {
+  const { cwShim } = require('../dist/functions/cwShim.js');
+  const req = makeRequest("https://example.com/v4_6_release/apis/3.0/service/boards?conditions=name='Service Desk'");
+  const res = await cwShim(req, context);
+
+  assert.equal(res.status, 200);
+  assert.ok(Array.isArray(res.jsonBody));
+  assert.equal(res.jsonBody.length, 1);
+  assert.equal(res.jsonBody[0].name, 'Service Desk');
+});
+
+test('ticket priority dropdown query supports id filter conditions', async () => {
+  const { cwShim } = require('../dist/functions/cwShim.js');
+  const req = makeRequest('https://example.com/v4_6_release/apis/3.0/service/priorities?conditions=id=1');
+  const res = await cwShim(req, context);
+
+  assert.equal(res.status, 200);
+  assert.ok(Array.isArray(res.jsonBody));
+  assert.equal(res.jsonBody.length, 1);
+  assert.equal(res.jsonBody[0].id, 1);
 });
 
 test('login companyinfo endpoint returns connectwise discovery payload', async () => {
