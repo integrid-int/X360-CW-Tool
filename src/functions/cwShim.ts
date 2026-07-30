@@ -196,24 +196,25 @@ function mapHaloTypeToType(ticketType: Record<string, unknown>): Record<string, 
 function mapHaloStatusToStatus(status: Record<string, unknown>): Record<string, unknown> {
   const id = getValueNumber(status, 'id', 'status_id') ?? 1;
   const name = getValueString(status, 'name', 'status_name') ?? `Status ${id}`;
-  const statusType = (getValueString(status, 'status_type', 'type') ?? '').toLowerCase();
-  const inferredClosed = statusType.includes('closed') || name.toLowerCase().includes('closed') || name.toLowerCase().includes('resolved');
+  // Halo `type` is a number (not a string), so rely on name-based closed/resolved inference.
+  const inferredClosed = name.toLowerCase().includes('closed') || name.toLowerCase().includes('resolved');
   return {
     id,
     boardId: 1,
     name,
-    sortOrder: getValueNumber(status, 'sortorder', 'order') ?? id,
+    sortOrder: getValueNumber(status, 'sequence', 'sortorder', 'order') ?? id,
     closedStatus: id === HALO_CLOSED_STATUS_ID || inferredClosed
   };
 }
 
 function mapHaloPriorityToPriority(priority: Record<string, unknown>): Record<string, unknown> {
-  const id = getValueNumber(priority, 'id', 'priority_id') ?? 1;
+  // Halo returns `priorityid` (integer 1-4) and `id` (GUID string). CW expects an integer.
+  const id = getValueNumber(priority, 'priorityid', 'id', 'priority_id') ?? 1;
   const name = getValueString(priority, 'name', 'priority_name') ?? `Priority ${id}`;
   return {
     id,
     name,
-    sortOrder: getValueNumber(priority, 'sortorder', 'order') ?? id
+    sortOrder: getValueNumber(priority, 'sequence', 'sortorder', 'order') ?? id
   };
 }
 
@@ -228,13 +229,19 @@ function mapHaloTicketToConnectWise(ticket: Record<string, unknown>, fallbackIde
     company.id = companyId;
   }
 
+  const statusId = getValueNumber(ticket, 'status_id') ?? 1;
+  // Halo tickets do not include status_name inline; infer name from known closed ID.
+  const statusName = statusId === HALO_CLOSED_STATUS_ID
+    ? 'Closed'
+    : (getValueString(ticket, 'status_name', 'status') ?? 'New');
+
   return {
     id,
     summary: getValueString(ticket, 'summary', 'title') ?? 'Shim ticket',
     initialDescription: getValueString(ticket, 'details', 'description') ?? '',
     status: {
-      id: getValueNumber(ticket, 'status_id') ?? 1,
-      name: getValueString(ticket, 'status_name', 'status') ?? 'New'
+      id: statusId,
+      name: statusName
     },
     board: {
       id: getValueNumber(ticket, 'team_id', 'board_id') ?? 1,
@@ -442,6 +449,15 @@ function filterPriorities(conditions: string, sourcePriorities: Record<string, u
   return priorities;
 }
 
+function filterBoards(conditions: string, sourceBoards: Record<string, unknown>[]) {
+  let boards = [...sourceBoards];
+  const id = parseConditionNumber(conditions, 'id');
+  if (id !== null) boards = boards.filter((board) => board.id === id);
+  const name = parseConditionValue(conditions, 'name');
+  if (name) boards = boards.filter((board) => typeof board.name === 'string' && board.name.toLowerCase() === name.toLowerCase());
+  return boards;
+}
+
 function getContactIdFromPath(path: string): number | null {
   const match = path.match(/\/company\/contacts\/(\d+)$/);
   if (!match?.[1]) return null;
@@ -575,7 +591,8 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
                                                  return { status: 200, headers: h, jsonBody: [createMember(effectiveIdentifier)] };
     if (path.includes('/service/boards') && !path.match(/\/boards\/\d+/)) {
       const boards = await getHaloBoards(context);
-      return { status: 200, headers: h, jsonBody: boards };
+      const conditions = req.query.get('conditions') ?? '';
+      return { status: 200, headers: h, jsonBody: filterBoards(conditions, boards) };
     }
     if (path.match(/\/service\/boards\/\d+$/) && method === 'GET') {
       const boardId = getBoardIdFromPath(path) ?? 1;
@@ -719,7 +736,11 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
 
         const haloCreatePayload: Record<string, unknown> = {
           summary,
-          details: initialDescription
+          details: initialDescription,
+          // Halo requires non-zero impact/urgency when no ticket type auto-derives them.
+          // 0 is treated as "unset" and fails validation; 1 is the minimum accepted value.
+          impact: 1,
+          urgency: 1
         };
         if (Number.isFinite(resolvedCompanyId)) haloCreatePayload.client_id = resolvedCompanyId;
         if (resolvedBoard?.id) haloCreatePayload.team_id = resolvedBoard.id;

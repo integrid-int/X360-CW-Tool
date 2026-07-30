@@ -209,27 +209,30 @@ export class HaloClient {
     return asObject(payload) ?? {};
   }
 
-  async closeTicket(ticketId: number, note: string): Promise<HaloRecord> {
-    try {
-      const payload = await this.request('/Tickets', {
-        method: 'POST',
-        body: JSON.stringify([{ id: ticketId, status_id: this.closedStatusId }])
-      });
-      const list = extractListPayload(payload, ['tickets', 'ticket', 'results']);
-      if (list.length > 0) return list[0];
-    } catch {
-      // Fallback action-based close for tenants configured this way.
-      await this.request('/Actions', {
-        method: 'POST',
-        body: JSON.stringify([{
-          ticket_id: ticketId,
-          outcome_id: this.closedStatusId,
-          note,
-          private_note: true,
-          sendemail: false
-        }])
-      });
+  async closeTicket(ticketId: number, _note: string): Promise<HaloRecord> {
+    // Different Halo ticket types accept different closed status IDs.
+    // Try the configured default first, then common fallbacks (8=Resolved, 9=Closed).
+    const candidateIds = [
+      this.closedStatusId,
+      ...([8, 9].filter((id) => id !== this.closedStatusId))
+    ];
+
+    for (const statusId of candidateIds) {
+      try {
+        const payload = await this.request('/Tickets', {
+          method: 'POST',
+          body: JSON.stringify([{ id: ticketId, status_id: statusId }])
+        });
+        const list = extractListPayload(payload, ['tickets', 'ticket', 'results']);
+        if (list.length > 0) return list[0];
+        // POST succeeded but returned an empty body; fetch current ticket state.
+        return this.getTicket(ticketId);
+      } catch {
+        // Status ID not valid for this ticket type — try next candidate.
+      }
     }
+
+    // All direct status updates failed; return current ticket state unchanged.
     return this.getTicket(ticketId);
   }
 }
