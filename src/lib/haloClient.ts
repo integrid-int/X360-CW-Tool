@@ -284,6 +284,94 @@ export class HaloClient {
     return asObject(payload) ?? {};
   }
 
+  async inspectAssignment(ticketId: number): Promise<Record<string, unknown>> {
+    const hidden = /email|e-mail|mail|phone|mobile|address|postcode|zip|token|secret|password|billing|invoice|latitude|longitude/i;
+    const scalars = (record: HaloRecord): Array<[string, string | number | boolean]> => Object.entries(record)
+      .filter(([key, value]) => !hidden.test(key))
+      .flatMap(([key, value]) => {
+        if (typeof value === 'number' || typeof value === 'boolean') return [[key, value] as [string, string | number | boolean]];
+        if (typeof value === 'string' && value.length > 0 && value.length < 160 && !value.includes('@') && !/^https?:/i.test(value)) {
+          return [[key, value] as [string, string | number | boolean]];
+        }
+        return [];
+      });
+    const outline = (record: HaloRecord) => ({
+      scalarCount: scalars(record).length,
+      scalars: scalars(record),
+      arrays: Object.entries(record).flatMap(([key, value]) => Array.isArray(value) ? [[key, value.length]] : []),
+      objects: Object.entries(record).flatMap(([key, value]) => value && typeof value === 'object' && !Array.isArray(value) ? [key] : [])
+    });
+    const probe = async (path: string): Promise<Record<string, unknown>> => {
+      try {
+        const payload = await this.request(path, { method: 'GET' });
+        const list = Array.isArray(payload)
+          ? payload.filter((item): item is HaloRecord => Boolean(asObject(item)))
+          : extractListPayload(payload, ['rules', 'ticketrules', 'results', 'items', 'records', 'workflows', 'agents', 'teams']);
+        const objectPayload = asObject(payload);
+        return {
+          path,
+          ok: true,
+          topKeys: objectPayload ? Object.keys(objectPayload).slice(0, 40) : [],
+          count: list.length,
+          names: list.slice(0, 40).map((row) => ({
+            id: readRecordString(row, ['id', 'rule_id', 'workflow_id']),
+            name: readRecordString(row, ['name', 'rule_name', 'summary', 'use'])
+          }))
+        };
+      } catch (error) {
+        return { path, ok: false, error: error instanceof Error ? error.message.slice(0, 220) : 'probe failed' };
+      }
+    };
+
+    const ticket = await this.getTicket(ticketId);
+    const typeId = Number(readRecordString(ticket, ['tickettype_id']));
+    const teamId = Number(readRecordString(ticket, ['team_id']));
+    const workflowId = Number(readRecordString(ticket, ['workflow_id']));
+    const [ticketType, team, recentPayload, workflow, probes] = await Promise.all([
+      Number.isFinite(typeId)
+        ? this.request(`/TicketType/${typeId}?includedetails=true&includeconfig=true&newticket=true`, { method: 'GET' }).then((payload) => asObject(payload) ?? {}).catch(() => ({} as HaloRecord))
+        : Promise.resolve({} as HaloRecord),
+      Number.isFinite(teamId)
+        ? this.request(`/Team/${teamId}?includedetails=true&includeagents=true`, { method: 'GET' }).then((payload) => asObject(payload) ?? {}).catch(() => ({} as HaloRecord))
+        : Promise.resolve({} as HaloRecord),
+      this.request('/Tickets?count=40&pageinate=false&order=id&orderdesc=true', { method: 'GET' }).catch((error: unknown) => error),
+      Number.isFinite(workflowId)
+        ? this.request(`/Workflow/${workflowId}?includedetails=true`, { method: 'GET' }).then((payload) => asObject(payload) ?? {}).catch(() => ({} as HaloRecord))
+        : Promise.resolve({} as HaloRecord),
+      Promise.all([
+        '/TicketRule?count=100&pageinate=false',
+        '/TicketRules?count=100&pageinate=false',
+        '/Rule?count=100&pageinate=false',
+        '/Automation?count=50&pageinate=false',
+        '/Workflow?count=20&pageinate=false',
+        `/Agent?team_id=${Number.isFinite(teamId) ? teamId : 1}&includeenabledonly=true&count=100`
+      ].map((path) => probe(path)))
+    ]);
+
+    const teamAgents = Array.isArray(team.agents) ? team.agents.filter((row: unknown): row is HaloRecord => Boolean(asObject(row))) : [];
+    const recentTickets = recentPayload instanceof Error
+      ? [{ error: recentPayload.message.slice(0, 220) }]
+      : extractListPayload(recentPayload, ['tickets', 'ticket', 'results']).slice(0, 40).map((row) => ({
+        id: readRecordString(row, ['id']),
+        agent_id: readRecordString(row, ['agent_id']),
+        team_id: readRecordString(row, ['team_id']),
+        tickettype_id: readRecordString(row, ['tickettype_id']),
+        priority_id: readRecordString(row, ['priority_id']),
+        dateoccurred: readRecordString(row, ['dateoccurred', 'dateassigned'])
+      }));
+    const steps = workflow.steps ?? workflow.workflowsteps;
+    const workflowSteps = Array.isArray(steps) ? steps.filter((step): step is HaloRecord => Boolean(asObject(step))).slice(0, 8).map((step) => outline(step)) : [];
+
+    return {
+      ticket: outline(ticket),
+      ticketType: outline(ticketType),
+      team: outline(team),
+      teamAgents: teamAgents.slice(0, 40).map((agent: HaloRecord) => outline(agent)),
+      recentTickets,
+      workflowSteps,
+      probes
+    };
+  }
 
   async closeTicket(ticketId: number, _note: string): Promise<HaloRecord> {
     // Different Halo ticket types accept different closed status IDs.
