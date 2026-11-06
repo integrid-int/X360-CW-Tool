@@ -360,15 +360,46 @@ export class HaloClient {
         dateoccurred: readRecordString(row, ['dateoccurred', 'dateassigned'])
       }));
     const steps = workflow.steps ?? workflow.workflowsteps;
-    const workflowSteps = Array.isArray(steps) ? steps.filter((step): step is HaloRecord => Boolean(asObject(step))).slice(0, 8).map((step) => outline(step)) : [];
+    const nested = (value: unknown) => Array.isArray(value)
+      ? value.filter((row): row is HaloRecord => Boolean(asObject(row))).slice(0, 12).map((row) => ({
+        ...outline(row),
+        children: Object.entries(row).flatMap(([key, child]) => Array.isArray(child)
+          ? [[key, child.filter((item): item is HaloRecord => Boolean(asObject(item))).slice(0, 8).map((item) => outline(item))]]
+          : [])
+      }))
+      : [];
+    const workflowSteps = Array.isArray(steps) ? steps.filter((step): step is HaloRecord => Boolean(asObject(step))).slice(0, 8).map((step) => ({
+      ...outline(step),
+      actions: nested(step.actions)
+    })) : [];
+    const rules = await Promise.all([1, 13, 17].map(async (ruleId) => {
+      try {
+        const payload = asObject(await this.request(`/TicketRules/${ruleId}`, { method: 'GET' })) ?? {};
+        return { id: ruleId, ...outline(payload), children: nested(payload.outcomes ?? payload.actions ?? payload.criteria ?? payload.rules) };
+      } catch (error) {
+        return { id: ruleId, error: error instanceof Error ? error.message.slice(0, 220) : 'rule lookup failed' };
+      }
+    }));
+    let actions: Array<Record<string, unknown>> = [];
+    try {
+      const actionPayload = await this.request(`/Actions?ticket_id=${ticketId}&count=20&includehtml=false`, { method: 'GET' });
+      actions = extractListPayload(actionPayload, ['actions', 'action', 'results']).slice(0, 12).map((row) => outline(row));
+    } catch (error) {
+      actions = [{ error: error instanceof Error ? error.message.slice(0, 180) : 'action lookup failed' }];
+    }
 
     return {
       ticket: outline(ticket),
+      matchedRules: nested(ticket.matched_rules),
+      viewers: nested(ticket.viewers),
+      workflowHistory: nested(ticket.workflow_history),
       ticketType: outline(ticketType),
       team: outline(team),
       teamAgents: teamAgents.slice(0, 40).map((agent: HaloRecord) => outline(agent)),
       recentTickets,
       workflowSteps,
+      rules,
+      actions,
       probes
     };
   }
