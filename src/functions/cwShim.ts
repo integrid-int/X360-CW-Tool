@@ -458,6 +458,18 @@ function filterBoards(conditions: string, sourceBoards: Record<string, unknown>[
   return boards;
 }
 
+function findGeneralContact(contacts: Record<string, unknown>[]): Record<string, unknown> | null {
+  for (const contact of contacts) {
+    const name = getValueString(contact, 'name')?.toLowerCase() ?? '';
+    const firstName = getValueString(contact, 'firstName', 'firstname')?.toLowerCase() ?? '';
+    const lastName = getValueString(contact, 'lastName', 'surname')?.toLowerCase() ?? '';
+    if (name.includes('general') || firstName.includes('general') || lastName.includes('general')) {
+      return contact;
+    }
+  }
+  return null;
+}
+
 function getContactIdFromPath(path: string): number | null {
   const match = path.match(/\/company\/contacts\/(\d+)$/);
   if (!match?.[1]) return null;
@@ -641,14 +653,17 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
       const conditions = req.query.get('conditions') ?? '';
       const requestedCompanyId = parseConditionNumber(conditions, 'company/id') ?? parseConditionNumber(conditions, 'company.id');
       let contacts = await getHaloContacts(context, requestedCompanyId ?? undefined);
+      const companyGeneralContact = findGeneralContact(contacts);
       const contactIdFromConditions = parseConditionNumber(conditions, 'id');
       const contactNameFromConditions = parseConditionValue(conditions, 'name');
       if (contactIdFromConditions !== null) {
         contacts = contacts.filter((contact) => contact.id === contactIdFromConditions);
         if (contacts.length === 0) {
-          // Axcient commonly probes with contact id=1; return a deterministic fallback shape
-          // instead of an empty list so connection tests can continue.
-          contacts = [{ ...MOCK_CONTACTS[0], id: contactIdFromConditions }];
+          // Axcient commonly probes with contact id=1. Prefer a company-level "general"
+          // user when available; otherwise return a deterministic fallback shape.
+          contacts = companyGeneralContact
+            ? [companyGeneralContact]
+            : [{ ...MOCK_CONTACTS[0], id: contactIdFromConditions }];
         }
       }
       if (contactNameFromConditions) {
@@ -657,7 +672,10 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
 
       const contactId = getContactIdFromPath(path);
       if (contactId !== null) {
-        const contact = contacts.find((candidate) => candidate.id === contactId) ?? contacts[0] ?? { ...MOCK_CONTACTS[0], id: contactId };
+        const contact = contacts.find((candidate) => candidate.id === contactId)
+          ?? companyGeneralContact
+          ?? contacts[0]
+          ?? { ...MOCK_CONTACTS[0], id: contactId };
         return { status: 200, headers: h, jsonBody: contact };
       }
       return { status: 200, headers: h, jsonBody: contacts };
@@ -740,21 +758,28 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
           if (!priorityName) return false;
           return String(priority.name).toLowerCase() === priorityName.toLowerCase();
         });
+        const contactsForCompany = await getHaloContacts(
+          context,
+          Number.isFinite(resolvedCompanyId) ? resolvedCompanyId : undefined
+        );
+        const companyGeneralContact = findGeneralContact(contactsForCompany);
         let resolvedContactId: number | null = null;
         if (contactId !== null) {
-          const contactsForCompany = await getHaloContacts(
-            context,
-            Number.isFinite(resolvedCompanyId) ? resolvedCompanyId : undefined
-          );
           const exactContact = contactsForCompany.find((contact) => contact.id === contactId);
           if (exactContact) {
             resolvedContactId = contactId;
           } else {
-            const firstContact = contactsForCompany[0];
-            if (firstContact && typeof firstContact === 'object') {
-              const fallbackContactId = getValueNumber(firstContact as Record<string, unknown>, 'id');
+            const fallbackContact = companyGeneralContact ?? contactsForCompany[0];
+            if (fallbackContact) {
+              const fallbackContactId = getValueNumber(fallbackContact, 'id');
               if (fallbackContactId !== null) resolvedContactId = fallbackContactId;
             }
+          }
+        } else {
+          const fallbackContact = companyGeneralContact ?? contactsForCompany[0];
+          if (fallbackContact) {
+            const fallbackContactId = getValueNumber(fallbackContact, 'id');
+            if (fallbackContactId !== null) resolvedContactId = fallbackContactId;
           }
         }
 
