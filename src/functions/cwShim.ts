@@ -643,7 +643,14 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
       let contacts = await getHaloContacts(context, requestedCompanyId ?? undefined);
       const contactIdFromConditions = parseConditionNumber(conditions, 'id');
       const contactNameFromConditions = parseConditionValue(conditions, 'name');
-      if (contactIdFromConditions !== null) contacts = contacts.filter((contact) => contact.id === contactIdFromConditions);
+      if (contactIdFromConditions !== null) {
+        contacts = contacts.filter((contact) => contact.id === contactIdFromConditions);
+        if (contacts.length === 0) {
+          // Axcient commonly probes with contact id=1; return a deterministic fallback shape
+          // instead of an empty list so connection tests can continue.
+          contacts = [{ ...MOCK_CONTACTS[0], id: contactIdFromConditions }];
+        }
+      }
       if (contactNameFromConditions) {
         contacts = contacts.filter((contact) => typeof contact.name === 'string' && contact.name.toLowerCase() === contactNameFromConditions.toLowerCase());
       }
@@ -733,6 +740,23 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
           if (!priorityName) return false;
           return String(priority.name).toLowerCase() === priorityName.toLowerCase();
         });
+        let resolvedContactId: number | null = null;
+        if (contactId !== null) {
+          const contactsForCompany = await getHaloContacts(
+            context,
+            Number.isFinite(resolvedCompanyId) ? resolvedCompanyId : undefined
+          );
+          const exactContact = contactsForCompany.find((contact) => contact.id === contactId);
+          if (exactContact) {
+            resolvedContactId = contactId;
+          } else {
+            const firstContact = contactsForCompany[0];
+            if (firstContact && typeof firstContact === 'object') {
+              const fallbackContactId = getValueNumber(firstContact as Record<string, unknown>, 'id');
+              if (fallbackContactId !== null) resolvedContactId = fallbackContactId;
+            }
+          }
+        }
 
         const haloCreatePayload: Record<string, unknown> = {
           summary,
@@ -746,7 +770,7 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
         if (resolvedBoard?.id) haloCreatePayload.team_id = resolvedBoard.id;
         if (resolvedType?.id) haloCreatePayload.tickettype_id = resolvedType.id;
         if (resolvedPriority?.id) haloCreatePayload.priority_id = resolvedPriority.id;
-        if (contactId !== null) haloCreatePayload.user_id = contactId;
+        if (resolvedContactId !== null) haloCreatePayload.user_id = resolvedContactId;
 
         const createdTicket = await haloClient.createTicket(haloCreatePayload);
         const mappedTicket = mapHaloTicketToConnectWise(createdTicket, effectiveIdentifier);
