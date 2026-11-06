@@ -295,14 +295,14 @@ export class HaloClient {
     }
     if (Number.isFinite(teamId)) {
       try {
-        team = asObject(await this.request(`/Team/${teamId}`, { method: 'GET' })) ?? {};
+        team = asObject(await this.request(`/Team/${teamId}?includedetails=true&includeagents=true`, { method: 'GET' })) ?? {};
       } catch { team = {}; }
     }
 
     const assignmentFields = (record: HaloRecord) => {
       const picked: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(record)) {
-        if (!/agent|assign|owner|who|taken|team|tickettype|workflow|user_id|user_name|site_id|site_name|client_id|client_name|category_1/i.test(key)) continue;
+        if (!/agent|assign|owner|who|taken|team|tickettype|workflow|user_id|user_name|site_id|site_name|client_id|client_name|category_1|account|manager|sla|priority|round|automatic/i.test(key)) continue;
         if (value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
           picked[key] = value;
         }
@@ -317,6 +317,22 @@ export class HaloClient {
         agent = asObject(await this.request(`/Agent/${agentId}`, { method: 'GET' })) ?? {};
       } catch { agent = {}; }
     }
+    const clientId = Number(readRecordString(ticket, ['client_id']));
+    const siteId = Number(readRecordString(ticket, ['site_id']));
+    let client: HaloRecord = {};
+    let site: HaloRecord = {};
+    if (Number.isFinite(clientId)) {
+      try { client = asObject(await this.request(`/Client/${clientId}`, { method: 'GET' })) ?? {}; } catch { client = {}; }
+    }
+    if (Number.isFinite(siteId)) {
+      try { site = asObject(await this.request(`/Site/${siteId}`, { method: 'GET' })) ?? {}; } catch { site = {}; }
+    }
+    const identity = (record: HaloRecord) => ({
+      id: readRecordString(record, ['id', 'agent_id']),
+      name: readRecordString(record, ['name', 'agent_name', 'displayname']),
+      firstName: readRecordString(record, ['firstname', 'first_name']),
+      lastName: readRecordString(record, ['surname', 'lastname', 'last_name'])
+    });
     const workflowId = Number(readRecordString(ticket, ['workflow_id']));
     let workflowSteps: Array<Record<string, unknown>> = [];
     if (Number.isFinite(workflowId)) {
@@ -338,11 +354,24 @@ export class HaloClient {
       } catch { workflowSteps = []; }
     }
 
+    const teamAgents = Array.isArray(team.agents) ? team.agents.slice(0, 30).map((row) => {
+      if (!row || typeof row !== 'object') return {};
+      const record = row as HaloRecord;
+      return {
+        ...identity(record),
+        default: record.default ?? record.isdefault ?? record.is_default ?? null,
+        automatic: record.exclude_from_automatic_assigning ?? record.automatic ?? null
+      };
+    }) : [];
+
     return {
       ticket: assignmentFields(ticket),
       ticketType: assignmentFields(ticketType),
       team: assignmentFields(team),
-      agent: assignmentFields(agent),
+      teamAgents,
+      agent: { ...identity(agent), ...assignmentFields(agent) },
+      client: { name: readRecordString(client, ['name']), ...assignmentFields(client) },
+      site: { name: readRecordString(site, ['name']), ...assignmentFields(site) },
       workflowSteps
     };
   }
