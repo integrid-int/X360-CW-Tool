@@ -23,6 +23,7 @@ export type HaloTicketBuildInput = {
   priorityName: string | null;
   contacts: Array<Record<string, unknown>>;
   contactId: number | null;
+  siteId?: number | null;
   categories: HaloCategoryRef[];
   categoryLevel1: string;
   categoryLevel2: string;
@@ -133,6 +134,24 @@ export function categoriesFromTicketType(ticketType: Record<string, unknown>): H
   return categories;
 }
 
+export function categoriesFromCatalog(rows: Array<Record<string, unknown>>): HaloCategoryRef[] {
+  const categories: HaloCategoryRef[] = [];
+  for (const row of rows) {
+    const id = readString(row, 'id', 'category_id', 'ticketcategory_id');
+    const name = readString(row, 'category_name', 'name', 'category', 'label', 'text', 'value_name');
+    if (!id || !name || id === name) continue;
+    const parentId = readString(row, 'parent_id', 'parentid', 'parentcategory_id', 'parentcategoryid');
+    const parent = parentId && parentId !== '0' ? parentId : null;
+    categories.push({
+      id,
+      name,
+      parentId: parent,
+      level: parent ? 2 : 1
+    });
+  }
+  return categories;
+}
+
 function resolveCategoryIds(input: HaloTicketBuildInput): { category1: string; category2: string; ticketTypeId: number | null } | null {
   const override1 = input.category1IdOverride?.trim() ?? '';
   const override2 = input.category2IdOverride?.trim() ?? '';
@@ -146,11 +165,14 @@ function resolveCategoryIds(input: HaloTicketBuildInput): { category1: string; c
   }) ?? input.categories.find((category) => normalizeName(category.name) === wantedLevel1);
   if (!level1) return null;
 
-  const level2 = input.categories.find((category) => {
-    if (normalizeName(category.name) !== wantedLevel2) return false;
-    if (category.level === 2) return level1.ticketTypeId === undefined || category.ticketTypeId === level1.ticketTypeId;
-    return category.parentId === level1.id;
-  });
+  const sameType = (category: HaloCategoryRef) => {
+    if (level1.ticketTypeId === undefined || category.ticketTypeId === undefined) return true;
+    return category.ticketTypeId === level1.ticketTypeId;
+  };
+  const namedChildren = input.categories.filter((category) => normalizeName(category.name) === wantedLevel2 && sameType(category));
+  const level2 = namedChildren.find((category) => category.parentId === level1.id)
+    ?? namedChildren.find((category) => category.level === 2)
+    ?? namedChildren[0];
   if (!level2) return null;
   return {
     category1: level1.id,
@@ -195,6 +217,7 @@ export function buildHaloTicketCreateRequest(input: HaloTicketBuildInput): HaloT
 
   const companyId = resolveHaloClientId(input);
   if (companyId !== null) payload.client_id = companyId;
+  if (input.siteId !== null && input.siteId !== undefined) payload.site_id = input.siteId;
 
   const board = findById(input.boards, input.boardId) ?? findByName(input.boards, input.boardName);
   const boardId = board ? readNumber(board, 'id') : null;

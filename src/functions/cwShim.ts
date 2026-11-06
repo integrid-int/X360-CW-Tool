@@ -483,6 +483,51 @@ function filterBoards(conditions: string, sourceBoards: Record<string, unknown>[
   return boards;
 }
 
+function isCentricCompany(identifier: string | null): boolean {
+  if (!identifier) return false;
+  const lower = identifier.trim().toLowerCase();
+  return lower.includes('centric') || lower === '96094' || lower === '17';
+}
+
+async function resolveCentricSiteId(
+  client: { listSites(clientId: number): Promise<Record<string, unknown>[]> },
+  companyIdentifier: string | null,
+  companyId: number | null,
+  context: InvocationContext
+): Promise<number | null> {
+  if (companyId === null || !isCentricCompany(companyIdentifier)) return null;
+  try {
+    const sites = await client.listSites(companyId);
+    const site = sites.find((candidate) => {
+      const name = getValueString(candidate, 'name', 'site_name') ?? '';
+      return name.toLowerCase().includes('centric');
+    });
+    return site ? getValueNumber(site, 'id', 'site_id') : null;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    context.warn('HALO_SITE_LOOKUP_FAILED', message.slice(0, 300));
+    return null;
+  }
+}
+
+function readCategoryDefaults(ticketType: Record<string, unknown> | null): Record<string, unknown> {
+  if (!ticketType) return {};
+  const nested = ticketType.tickettype ?? ticketType.ticketType;
+  const source = nested && typeof nested === 'object' && !Array.isArray(nested)
+    ? nested as Record<string, unknown>
+    : ticketType;
+  const summary: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (!/cat/i.test(key)) continue;
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || value === null) {
+      summary[key] = value;
+    } else if (Array.isArray(value)) {
+      summary[`${key}Count`] = value.length;
+    }
+  }
+  return summary;
+}
+
 function findGeneralContact(contacts: Record<string, unknown>[]): Record<string, unknown> | null {
   for (const contact of contacts) {
     const name = getValueString(contact, 'name')?.toLowerCase() ?? '';
@@ -750,14 +795,18 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
           return { status: 200, headers: h, jsonBody: closedResponse };
         }
 
-        const [companies, boards, types, priorities, incidentType] = await Promise.all([
+        const [companies, boards, types, priorities, incidentType, categoryCatalog] = await Promise.all([
           getHaloCompanies(context),
           getHaloBoards(context),
           getHaloTypes(context),
           getHaloPriorities(context),
-          haloClient.getIncidentTicketType()
+          haloClient.getIncidentTicketType(),
+          haloClient.listTicketCategories()
         ]);
-        const categories = incidentType ? categoriesFromTicketType(incidentType) : [];
+        const categories = [
+          ...(incidentType ? categoriesFromTicketType(incidentType) : []),
+          ...categoryCatalog.categories
+        ];
         const companyIdentifier = getNestedString(parsed, 'company', 'identifier')
           ?? getNestedString(parsed, 'company', 'id')
           ?? getNestedString(parsed, 'company', 'name');
@@ -772,6 +821,7 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
           context,
           resolvedCompanyId !== null ? resolvedCompanyId : undefined
         );
+        const siteId = await resolveCentricSiteId(haloClient, companyIdentifier, resolvedCompanyId, context);
         const built = buildHaloTicketCreateRequest({
           summary: typeof parsed.summary === 'string' && parsed.summary.trim().length > 0 ? parsed.summary : 'Shim ticket',
           details: typeof parsed.initialDescription === 'string' ? parsed.initialDescription : '',
@@ -789,6 +839,7 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
           priorityName: getNestedString(parsed, 'priority', 'name'),
           contacts: contactsForCompany,
           contactId: getNestedNumber(parsed, 'contact', 'id'),
+          siteId,
           categories,
           categoryLevel1: 'Incident',
           categoryLevel2: 'Backup'
@@ -800,7 +851,9 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
             headers: h,
             jsonBody: {
               error: 'Halo ticket category could not be resolved.',
-              detail: built.error
+              detail: built.error,
+              categoryDefaults: readCategoryDefaults(incidentType),
+              categoryProbes: categoryCatalog.attempts
             }
           };
         }

@@ -1,8 +1,10 @@
+import { categoriesFromCatalog, HaloCategoryRef } from './haloTicketPayload';
+
 type HaloRecord = Record<string, unknown>;
-type HaloCategory = {
-  id: string;
-  name: string;
-  parentId: string | null;
+type HaloCategoryProbe = {
+  endpoint: string;
+  result: string;
+  count: number;
 };
 
 export type HaloConfig = {
@@ -185,8 +187,16 @@ export class HaloClient {
     if (!incident) return null;
     const id = Number(readRecordString(incident, ['id', 'tickettype_id']));
     if (!Number.isFinite(id)) return null;
-    if (Array.isArray(incident.allowed_category1) || Array.isArray(incident.allowed_category2)) return incident;
-    return this.getTicketType(id);
+    const hasCategories = (Array.isArray(incident.allowed_category1) && incident.allowed_category1.length > 0)
+      || (Array.isArray(incident.allowed_category2) && incident.allowed_category2.length > 0);
+    if (hasCategories) return incident;
+    const detail = await this.getTicketType(id);
+    return { ...incident, ...detail };
+  }
+
+  async listSites(clientId: number): Promise<HaloRecord[]> {
+    const payload = await this.request(`/Site?client_id=${clientId}&count=500&pageinate=false`, { method: 'GET' });
+    return extractListPayload(payload, ['sites', 'site', 'results']);
   }
 
   async listTicketTypes(clientId?: number): Promise<HaloRecord[]> {
@@ -214,35 +224,37 @@ export class HaloClient {
     return extractListPayload(payload, ['priorities', 'priority', 'policies']);
   }
 
-  async listTicketCategories(): Promise<HaloCategory[]> {
+  async listTicketCategories(): Promise<{ categories: HaloCategoryRef[]; attempts: HaloCategoryProbe[] }> {
     const endpoints = [
+      '/Category?showall=true&count=1000&pageinate=false',
       '/Category?showall=true',
       '/Categories?showall=true',
       '/TicketCategory?showall=true',
-      '/TicketCategories?showall=true',
-      '/Category?showall=true&entity=ticket',
-      '/Category?showall=true&type=ticket'
+      '/TicketCategories?showall=true'
     ];
+    const attempts: HaloCategoryProbe[] = [];
     for (const endpoint of endpoints) {
       try {
         const payload = await this.request(endpoint, { method: 'GET' });
-        const rows = extractListPayload(payload, ['categories', 'category', 'ticketcategories', 'ticketcategory', 'results', 'items']);
-        if (rows.length === 0) continue;
-
-        const categories: HaloCategory[] = [];
-        for (const row of rows) {
-          const id = readRecordString(row, ['id', 'category_id', 'ticketcategory_id', 'value']);
-          const name = readRecordString(row, ['name', 'category', 'label', 'text']);
-          if (!id || !name) continue;
-          const parentId = readRecordString(row, ['parent_id', 'parentid', 'parentcategory_id', 'parentcategoryid', 'parent']);
-          categories.push({ id, name, parentId });
-        }
-        if (categories.length > 0) return categories;
-      } catch {
-        // Ignore unsupported endpoints and try the next candidate.
+        const rows = extractListPayload(payload, ['categories', 'category', 'ticketcategories', 'ticketcategory', 'results', 'items', 'records']);
+        const categories = categoriesFromCatalog(rows);
+        const topKeys = Array.isArray(payload)
+          ? `array:${payload.length}`
+          : payload && typeof payload === 'object'
+            ? Object.keys(payload).slice(0, 12).join(',')
+            : typeof payload;
+        attempts.push({
+          endpoint,
+          result: categories.length > 0 ? 'ok' : `empty keys=${topKeys}`,
+          count: categories.length
+        });
+        if (categories.length > 0) return { categories, attempts };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        attempts.push({ endpoint, result: message.slice(0, 180), count: 0 });
       }
     }
-    return [];
+    return { categories: [], attempts };
   }
 
   async listTickets(ticketIds?: number[]): Promise<HaloRecord[]> {

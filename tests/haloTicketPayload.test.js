@@ -160,6 +160,40 @@ test('axcient client ids map onto halo clients and unmatched ids are omitted', (
   assert.equal(unmatched.payload.client_id, undefined);
 });
 
+test('catalog category_name rows resolve incident parent and backup child', () => {
+  const { buildHaloTicketCreateRequest, categoriesFromCatalog } = require('../dist/lib/haloTicketPayload.js');
+  const categories = categoriesFromCatalog([
+    { id: 5, category_name: 'Incident', parent_id: 0 },
+    { id: 9, category_name: 'Backup', parent_id: 5 },
+    { id: 8, category_name: 'Backup', parent_id: 3 }
+  ]);
+  const result = buildHaloTicketCreateRequest({
+    summary: 'catalog',
+    details: '',
+    companyIdentifier: null,
+    companies: [],
+    customerCompanies: [],
+    companyMap: {},
+    boards: [],
+    boardId: null,
+    boardName: null,
+    types: [],
+    typeId: null,
+    typeName: null,
+    priorities: [],
+    priorityName: null,
+    contacts: [],
+    contactId: null,
+    categories,
+    categoryLevel1: 'Incident',
+    categoryLevel2: 'Backup'
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.payload.category_1, '5');
+  assert.equal(result.payload.category_2, '9');
+  assert.equal(result.payload.tickettype_id, undefined);
+});
+
 test('incident ticket type supplies incident and backup category ids', () => {
   const { categoriesFromTicketType } = require('../dist/lib/haloTicketPayload.js');
   const categories = categoriesFromTicketType({
