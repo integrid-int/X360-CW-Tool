@@ -853,7 +853,11 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
               error: 'Halo ticket category could not be resolved.',
               detail: built.error,
               categoryDefaults: readCategoryDefaults(incidentType),
-              categoryProbes: categoryCatalog.attempts
+              categoryProbes: categoryCatalog.attempts,
+              categoryNames: (categoryCatalog.categories.some((category) => /inc|back|bck|resol/i.test(category.name))
+                ? categoryCatalog.categories.filter((category) => /inc|back|bck|resol/i.test(category.name))
+                : categoryCatalog.categories.slice(0, 60))
+                .map((category) => ({ id: category.id, name: category.name, parentId: category.parentId }))
             }
           };
         }
