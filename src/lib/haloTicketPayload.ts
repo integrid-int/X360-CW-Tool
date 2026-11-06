@@ -219,9 +219,7 @@ export function buildHaloTicketCreateRequest(input: HaloTicketBuildInput): HaloT
   const payload: Record<string, unknown> = {
     summary: input.summary,
     details: input.details,
-    category_1: categories.category1,
-    impact: 1,
-    urgency: 1
+    category_1: categories.category1
   };
   if (categories.category2) payload.category_2 = categories.category2;
 
@@ -240,10 +238,6 @@ export function buildHaloTicketCreateRequest(input: HaloTicketBuildInput): HaloT
     const ticketTypeId = ticketType ? readNumber(ticketType, 'id') : null;
     if (ticketTypeId !== null) payload.tickettype_id = ticketTypeId;
   }
-
-  const priority = findByName(input.priorities, input.priorityName);
-  const priorityId = priority ? readNumber(priority, 'id') : null;
-  if (priorityId !== null) payload.priority_id = priorityId;
 
   const contactId = resolveContactId(input);
   if (contactId !== null) payload.user_id = contactId;

@@ -38,6 +38,9 @@ test('halo ticket payload uses catalog category ids and mapped company, type, an
   assert.equal(result.payload.category_2, '11');
   assert.equal(result.payload.category1, undefined);
   assert.equal(result.payload.category2, undefined);
+  assert.equal(result.payload.impact, undefined);
+  assert.equal(result.payload.urgency, undefined);
+  assert.equal(result.payload.priority_id, undefined);
   assert.equal(JSON.stringify(result.payload).includes('Incident'), false);
   assert.equal(JSON.stringify(result.payload).includes('Backup'), false);
 });

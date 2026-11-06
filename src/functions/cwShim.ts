@@ -664,11 +664,6 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
   }
 
   try {
-    if (path.includes('/_shim/assignment/') && method === 'GET' && haloClient) {
-      const ticketId = Number(path.match(/\/_shim\/assignment\/(\d+)/)?.[1]);
-      if (!Number.isFinite(ticketId)) return { status: 400, headers: h, jsonBody: { error: 'Ticket id is required.' } };
-      return { status: 200, headers: h, jsonBody: await haloClient.describeAssignment(ticketId) };
-    }
     if (path.includes('/system/info'))            return { status: 200, headers: h, jsonBody: MOCK_SYSTEM_INFO };
     if (path.includes('/system/members/me'))      return { status: 200, headers: h, jsonBody: createMember(authIdentifier) };
     if (path.match(/\/system\/members\/count$/) && method === 'GET')
@@ -800,11 +795,10 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
           return { status: 200, headers: h, jsonBody: closedResponse };
         }
 
-        const [companies, boards, types, priorities, incidentType, categoryCatalog] = await Promise.all([
+        const [companies, boards, types, incidentType, categoryCatalog] = await Promise.all([
           getHaloCompanies(context),
           getHaloBoards(context),
           getHaloTypes(context),
-          getHaloPriorities(context),
           haloClient.getIncidentTicketType(),
           haloClient.listTicketCategories()
         ]);
@@ -840,8 +834,8 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
           types,
           typeId: incidentType ? getValueNumber(incidentType, 'id', 'tickettype_id') : getNestedNumber(parsed, 'type', 'id'),
           typeName: incidentType ? 'Incident' : getNestedString(parsed, 'type', 'name'),
-          priorities,
-          priorityName: getNestedString(parsed, 'priority', 'name'),
+          priorities: [],
+          priorityName: null,
           contacts: contactsForCompany,
           contactId: getNestedNumber(parsed, 'contact', 'id'),
           siteId,
