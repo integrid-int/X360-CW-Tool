@@ -335,6 +335,23 @@ export class HaloClient {
     });
     const workflowId = Number(readRecordString(ticket, ['workflow_id']));
     let workflowSteps: Array<Record<string, unknown>> = [];
+    let actions: Array<Record<string, unknown>> = [];
+    try {
+      const actionPayload = await this.request(`/Actions?ticket_id=${ticketId}&count=20&includehtml=false`, { method: 'GET' });
+      const rows = extractListPayload(actionPayload, ['actions', 'action', 'results']);
+      actions = rows.slice(0, 10).map((row) => {
+        const summary: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(row)) {
+          if (!/who|agent|outcome|note|actiondate|datetime|status|assign|hidden|description/i.test(key)) continue;
+          if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || value === null) {
+            summary[key] = typeof value === 'string' ? value.slice(0, 240) : value;
+          }
+        }
+        return summary;
+      });
+    } catch (error) {
+      actions = [{ error: error instanceof Error ? error.message.slice(0, 180) : 'action lookup failed' }];
+    }
     if (Number.isFinite(workflowId)) {
       try {
         const workflow = asObject(await this.request(`/Workflow/${workflowId}?includedetails=true`, { method: 'GET' })) ?? {};
@@ -345,8 +362,21 @@ export class HaloClient {
             const record = step as HaloRecord;
             const picked: Record<string, unknown> = {};
             for (const [key, value] of Object.entries(record)) {
-              if (!/name|seq|step|agent|assign|team|action|type/i.test(key)) continue;
+              if (!/name|seq|step|agent|assign|team|action|type|outcome/i.test(key)) continue;
               if (value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') picked[key] = value;
+            }
+            const outcomes = record.outcomes ?? record.actions ?? record.flowactions;
+            if (Array.isArray(outcomes)) {
+              picked.outcomes = outcomes.slice(0, 8).map((outcome) => {
+                if (!outcome || typeof outcome !== 'object') return {};
+                const row = outcome as HaloRecord;
+                const summary: Record<string, unknown> = {};
+                for (const [key, value] of Object.entries(row)) {
+                  if (!/name|agent|assign|team|status|outcome|default/i.test(key)) continue;
+                  if (value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') summary[key] = value;
+                }
+                return summary;
+              });
             }
             return picked;
           });
@@ -372,7 +402,9 @@ export class HaloClient {
       agent: { ...identity(agent), ...assignmentFields(agent) },
       client: { name: readRecordString(client, ['name']), ...assignmentFields(client) },
       site: { name: readRecordString(site, ['name']), ...assignmentFields(site) },
-      workflowSteps
+      workflowSteps,
+      actions,
+      teamFieldCount: Object.keys(team).length
     };
   }
 
