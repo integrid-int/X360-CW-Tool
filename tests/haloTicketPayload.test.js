@@ -77,7 +77,8 @@ test('axcient client ids map onto halo clients and unmatched ids are omitted', (
   const companies = [
     { id: 12, name: 'Integrid LLC' },
     { id: 30, name: 'Moonlight Imaging' },
-    { id: 35, name: 'Pinnacle Contracting Services' }
+    { id: 35, name: 'Pinnacle Contracting Services' },
+    { id: 70, name: 'Forum Supply Company' }
   ];
   const categories = [
     { id: '10', name: 'Incident', parentId: null, level: 1, ticketTypeId: 1 },
@@ -110,10 +111,34 @@ test('axcient client ids map onto halo clients and unmatched ids are omitted', (
   assert.equal(mapped.payload.category_1, '10');
   assert.equal(mapped.payload.category_2, '11');
 
+  const centric = buildHaloTicketCreateRequest({
+    summary: 'centric site of forum',
+    details: '',
+    companyIdentifier: '96094',
+    companies,
+    customerCompanies: [{ id: 17, name: 'Centric Mechanical', identifier: '17' }],
+    companyMap: AXCIENT_HALO_COMPANY_MAP,
+    boards: [],
+    boardId: null,
+    boardName: null,
+    types: [],
+    typeId: null,
+    typeName: null,
+    priorities: [],
+    priorityName: null,
+    contacts: [],
+    contactId: null,
+    categories,
+    categoryLevel1: 'Incident',
+    categoryLevel2: 'Backup'
+  });
+  assert.equal(centric.ok, true);
+  assert.equal(centric.payload.client_id, 70);
+
   const unmatched = buildHaloTicketCreateRequest({
     summary: 'unmatched',
     details: '',
-    companyIdentifier: '96094',
+    companyIdentifier: '104493',
     companies,
     customerCompanies: [],
     companyMap: AXCIENT_HALO_COMPANY_MAP,

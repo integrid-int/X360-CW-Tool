@@ -1,7 +1,8 @@
 // Axcient x360Recover client id / name -> Halo client id.
 // Built from the x360Recover client list and the live Halo client list.
+// Centric Mechanical is a site of Forum Supply, so it uses Halo client 70.
 // Unmatched Axcient clients (no Halo client with that name):
-// Centric Mechnical (96094), Classic Wood Products (104493), Washington Island Electric Co-op (120983).
+// Classic Wood Products (104493), Washington Island Electric Co-op (120983).
 export const AXCIENT_HALO_COMPANY_MAP: Record<string, number> = {
   '1': 12,
   '45556': 12,
@@ -24,8 +25,12 @@ export const AXCIENT_HALO_COMPANY_MAP: Record<string, number> = {
   '83694': 43,
   'volvo cars of winston salem': 43,
   '94162': 70,
+  '17': 70,
+  '96094': 70,
   'forum supply': 70,
   'forum supply company': 70,
+  'centric mechanical': 70,
+  'centric mechnical': 70,
   '95355': 36,
   'rci doors': 36,
   '95356': 29,
