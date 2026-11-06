@@ -284,6 +284,39 @@ export class HaloClient {
     return asObject(payload) ?? {};
   }
 
+  async describeAssignment(ticketId: number): Promise<Record<string, unknown>> {
+    const ticket = await this.getTicket(ticketId);
+    const typeId = Number(readRecordString(ticket, ['tickettype_id', 'tickettype']));
+    const teamId = Number(readRecordString(ticket, ['team_id']));
+    let ticketType: HaloRecord = {};
+    let team: HaloRecord = {};
+    if (Number.isFinite(typeId)) {
+      try { ticketType = await this.getTicketType(typeId); } catch { ticketType = {}; }
+    }
+    if (Number.isFinite(teamId)) {
+      try {
+        team = asObject(await this.request(`/Team/${teamId}`, { method: 'GET' })) ?? {};
+      } catch { team = {}; }
+    }
+
+    const assignmentFields = (record: HaloRecord) => {
+      const picked: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(record)) {
+        if (!/agent|assign|owner|who|taken|team|tickettype|workflow|user_id|user_name|site_id|site_name|client_id|client_name|category_1/i.test(key)) continue;
+        if (value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+          picked[key] = value;
+        }
+      }
+      return picked;
+    };
+
+    return {
+      ticket: assignmentFields(ticket),
+      ticketType: assignmentFields(ticketType),
+      team: assignmentFields(team)
+    };
+  }
+
   async closeTicket(ticketId: number, _note: string): Promise<HaloRecord> {
     // Different Halo ticket types accept different closed status IDs.
     // Try the configured default first, then common fallbacks (8=Resolved, 9=Closed).
