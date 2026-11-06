@@ -102,7 +102,30 @@ const HALO_CLOSED_STATUS_ID = Number(
     ? haloClosedStatusRaw
     : '9'
 ) || 9;
+const HALO_COMPANY_MAP = parseHaloCompanyMap(process.env.HaloCompanyMap);
 const haloClient = createHaloClientFromEnv();
+
+function parseHaloCompanyMap(raw: string | undefined): Record<string, number> {
+  if (!raw || raw.trim().length === 0) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const output: Record<string, number> = {};
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof key !== 'string' || key.trim().length === 0) continue;
+      const asNumber = typeof value === 'number'
+        ? value
+        : typeof value === 'string'
+          ? Number(value)
+          : NaN;
+      if (!Number.isFinite(asNumber)) continue;
+      output[key.trim().toLowerCase()] = asNumber;
+    }
+    return output;
+  } catch {
+    return {};
+  }
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -458,6 +481,55 @@ function filterBoards(conditions: string, sourceBoards: Record<string, unknown>[
   return boards;
 }
 
+function normalizeName(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+function resolveHaloCompanyId(companyIdentifier: string | null, companies: Record<string, unknown>[]): number | null {
+  if (!companyIdentifier) return null;
+  const raw = companyIdentifier.trim();
+  if (raw.length === 0) return null;
+  const lower = raw.toLowerCase();
+
+  const directMatch = companies.find((company) => {
+    return String(company.identifier ?? '').toLowerCase() === lower
+      || String(company.name ?? '').toLowerCase() === lower
+      || String(company.id ?? '') === raw;
+  });
+  if (directMatch) return getValueNumber(directMatch, 'id');
+
+  const staticCustomer = CUSTOMER_COMPANIES.find((customer) => {
+    return customer.identifier.toLowerCase() === lower
+      || String(customer.id) === raw
+      || customer.name.toLowerCase() === lower;
+  });
+  if (staticCustomer) {
+    const targetName = normalizeName(staticCustomer.name);
+    const haloByName = companies.find((company) => {
+      const haloName = typeof company.name === 'string' ? company.name : '';
+      return normalizeName(haloName) === targetName;
+    });
+    if (haloByName) return getValueNumber(haloByName, 'id');
+  }
+
+  const mapCandidates = [
+    lower,
+    staticCustomer?.identifier.toLowerCase() ?? '',
+    staticCustomer?.name.toLowerCase() ?? ''
+  ].filter((candidate) => candidate.length > 0);
+  for (const candidate of mapCandidates) {
+    const mappedId = HALO_COMPANY_MAP[candidate];
+    if (!Number.isFinite(mappedId)) continue;
+    const mappedCompany = companies.find((company) => getValueNumber(company, 'id') === mappedId);
+    if (mappedCompany) return mappedId;
+    return mappedId;
+  }
+
+  const asNumber = Number(raw);
+  if (Number.isFinite(asNumber)) return asNumber;
+  return null;
+}
+
 function findGeneralContact(contacts: Record<string, unknown>[]): Record<string, unknown> | null {
   for (const contact of contacts) {
     const name = getValueString(contact, 'name')?.toLowerCase() ?? '';
@@ -743,24 +815,18 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
           ? parsed.summary
           : 'Shim ticket';
         const initialDescription = typeof parsed.initialDescription === 'string' ? parsed.initialDescription : '';
-
-        const companyFromName = companies.find((company) => {
-          if (!companyIdentifier) return false;
-          const normalized = companyIdentifier.toLowerCase();
-          return String(company.identifier ?? '').toLowerCase() === normalized
-            || String(company.name ?? '').toLowerCase() === normalized
-            || String(company.id ?? '') === companyIdentifier;
-        });
-        const resolvedCompanyId = companyFromName ? Number(companyFromName.id) : Number(companyIdentifier);
+        const resolvedCompanyId = resolveHaloCompanyId(companyIdentifier, companies);
         const resolvedBoard = boards.find((board) => String(board.name).toLowerCase() === boardName.toLowerCase());
         const resolvedType = types.find((type) => String(type.name).toLowerCase() === typeName.toLowerCase());
         const resolvedPriority = priorities.find((priority) => {
           if (!priorityName) return false;
           return String(priority.name).toLowerCase() === priorityName.toLowerCase();
         });
+        const resolvedCompanyIdForContacts =
+          resolvedCompanyId !== null && Number.isFinite(resolvedCompanyId) ? resolvedCompanyId : undefined;
         const contactsForCompany = await getHaloContacts(
           context,
-          Number.isFinite(resolvedCompanyId) ? resolvedCompanyId : undefined
+          resolvedCompanyIdForContacts
         );
         const companyGeneralContact = findGeneralContact(contactsForCompany);
         let resolvedContactId: number | null = null;
@@ -791,7 +857,7 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
           impact: 1,
           urgency: 1
         };
-        if (Number.isFinite(resolvedCompanyId)) haloCreatePayload.client_id = resolvedCompanyId;
+        if (resolvedCompanyId !== null && Number.isFinite(resolvedCompanyId)) haloCreatePayload.client_id = resolvedCompanyId;
         if (resolvedBoard?.id) haloCreatePayload.team_id = resolvedBoard.id;
         if (resolvedType?.id) haloCreatePayload.tickettype_id = resolvedType.id;
         if (resolvedPriority?.id) haloCreatePayload.priority_id = resolvedPriority.id;
