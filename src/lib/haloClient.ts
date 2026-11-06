@@ -404,7 +404,10 @@ export class HaloClient {
       site: { name: readRecordString(site, ['name']), ...assignmentFields(site) },
       workflowSteps,
       actions,
-      teamFieldCount: Object.keys(team).length
+      teamFieldCount: Object.keys(team).length,
+      teamScalars: Object.entries(team)
+        .filter(([, value]) => typeof value === 'number' || typeof value === 'boolean' || (typeof value === 'string' && value.length > 0 && value.length < 80 && !value.startsWith('/')))
+        .map(([key, value]) => [key, value])
     };
   }
 
