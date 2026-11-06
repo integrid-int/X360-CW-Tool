@@ -310,10 +310,40 @@ export class HaloClient {
       return picked;
     };
 
+    const agentId = Number(readRecordString(ticket, ['agent_id']));
+    let agent: HaloRecord = {};
+    if (Number.isFinite(agentId) && agentId > 1) {
+      try {
+        agent = asObject(await this.request(`/Agent/${agentId}`, { method: 'GET' })) ?? {};
+      } catch { agent = {}; }
+    }
+    const workflowId = Number(readRecordString(ticket, ['workflow_id']));
+    let workflowSteps: Array<Record<string, unknown>> = [];
+    if (Number.isFinite(workflowId)) {
+      try {
+        const workflow = asObject(await this.request(`/Workflow/${workflowId}?includedetails=true`, { method: 'GET' })) ?? {};
+        const steps = workflow.steps ?? workflow.workflowsteps ?? workflow.actions;
+        if (Array.isArray(steps)) {
+          workflowSteps = steps.slice(0, 12).map((step) => {
+            if (!step || typeof step !== 'object') return {};
+            const record = step as HaloRecord;
+            const picked: Record<string, unknown> = {};
+            for (const [key, value] of Object.entries(record)) {
+              if (!/name|seq|step|agent|assign|team|action|type/i.test(key)) continue;
+              if (value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') picked[key] = value;
+            }
+            return picked;
+          });
+        }
+      } catch { workflowSteps = []; }
+    }
+
     return {
       ticket: assignmentFields(ticket),
       ticketType: assignmentFields(ticketType),
-      team: assignmentFields(team)
+      team: assignmentFields(team),
+      agent: assignmentFields(agent),
+      workflowSteps
     };
   }
 
