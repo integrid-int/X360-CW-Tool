@@ -1,4 +1,9 @@
 type HaloRecord = Record<string, unknown>;
+type HaloCategory = {
+  id: string;
+  name: string;
+  parentId: string | null;
+};
 
 export type HaloConfig = {
   clientId: string;
@@ -39,6 +44,15 @@ function extractListPayload(payload: unknown, candidateKeys: string[]): HaloReco
     if (Array.isArray(value)) return value.filter((item): item is HaloRecord => Boolean(asObject(item)));
   }
   return [];
+}
+
+function readRecordString(record: HaloRecord, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim().length > 0) return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  }
+  return null;
 }
 
 export class HaloClient {
@@ -180,6 +194,37 @@ export class HaloClient {
   async listPriorities(): Promise<HaloRecord[]> {
     const payload = await this.request('/Priority?includedistinct=true', { method: 'GET' });
     return extractListPayload(payload, ['priorities', 'priority', 'policies']);
+  }
+
+  async listTicketCategories(): Promise<HaloCategory[]> {
+    const endpoints = [
+      '/Category?showall=true',
+      '/Categories?showall=true',
+      '/TicketCategory?showall=true',
+      '/TicketCategories?showall=true',
+      '/Category?showall=true&entity=ticket',
+      '/Category?showall=true&type=ticket'
+    ];
+    for (const endpoint of endpoints) {
+      try {
+        const payload = await this.request(endpoint, { method: 'GET' });
+        const rows = extractListPayload(payload, ['categories', 'category', 'ticketcategories', 'ticketcategory', 'results', 'items']);
+        if (rows.length === 0) continue;
+
+        const categories: HaloCategory[] = [];
+        for (const row of rows) {
+          const id = readRecordString(row, ['id', 'category_id', 'ticketcategory_id', 'value']);
+          const name = readRecordString(row, ['name', 'category', 'label', 'text']);
+          if (!id || !name) continue;
+          const parentId = readRecordString(row, ['parent_id', 'parentid', 'parentcategory_id', 'parentcategoryid', 'parent']);
+          categories.push({ id, name, parentId });
+        }
+        if (categories.length > 0) return categories;
+      } catch {
+        // Ignore unsupported endpoints and try the next candidate.
+      }
+    }
+    return [];
   }
 
   async listTickets(ticketIds?: number[]): Promise<HaloRecord[]> {

@@ -884,13 +884,48 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
           if (!categoryRejected) throw error;
 
           const fallbackPayload = { ...haloCreatePayload };
-          delete fallbackPayload.category_1;
-          delete fallbackPayload.category_2;
-          context.warn(
-            'HALO_CATEGORY_REJECTED retrying ticket create without category fields',
-            JSON.stringify({ category_1: categoryLevel1, category_2: categoryLevel2 })
-          );
-          createdTicket = await haloClient.createTicket(fallbackPayload);
+          const categories = await haloClient.listTicketCategories();
+          const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '');
+          const wantedLevel1 = normalize(categoryLevel1);
+          const wantedLevel2 = normalize(categoryLevel2);
+          const level1 = categories.find((category) => normalize(category.name) === wantedLevel1);
+          let level2 = categories.find((category) => normalize(category.name) === wantedLevel2);
+          if (level1) {
+            const childMatch = categories.find((category) => category.parentId === level1.id && normalize(category.name) === wantedLevel2);
+            if (childMatch) level2 = childMatch;
+          }
+
+          if (level1 || level2) {
+            if (level1) fallbackPayload.category_1 = level1.id;
+            if (level2) fallbackPayload.category_2 = level2.id;
+            context.warn(
+              'HALO_CATEGORY_REJECTED retrying ticket create with discovered category ids',
+              JSON.stringify({
+                requested: { category_1: categoryLevel1, category_2: categoryLevel2 },
+                resolved: { category_1: level1?.id ?? null, category_2: level2?.id ?? null },
+                categorySample: categories.slice(0, 25)
+              })
+            );
+            try {
+              createdTicket = await haloClient.createTicket(fallbackPayload);
+            } catch {
+              delete fallbackPayload.category_1;
+              delete fallbackPayload.category_2;
+              context.warn(
+                'HALO_CATEGORY_RETRY_WITH_IDS_FAILED retrying ticket create without category fields',
+                JSON.stringify({ category_1: categoryLevel1, category_2: categoryLevel2 })
+              );
+              createdTicket = await haloClient.createTicket(fallbackPayload);
+            }
+          } else {
+            delete fallbackPayload.category_1;
+            delete fallbackPayload.category_2;
+            context.warn(
+              'HALO_CATEGORY_REJECTED no category ids discovered, retrying ticket create without category fields',
+              JSON.stringify({ category_1: categoryLevel1, category_2: categoryLevel2 })
+            );
+            createdTicket = await haloClient.createTicket(fallbackPayload);
+          }
         }
         const mappedTicket = mapHaloTicketToConnectWise(createdTicket, effectiveIdentifier);
         const mappedTicketId = extractTicketId(mappedTicket.id) ?? Math.floor(Math.random() * 90000) + 10000;
