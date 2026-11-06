@@ -62,7 +62,7 @@ resource functionApp 'Microsoft.Web/sites@2022-09-01' = {
     serverFarmId: hostingPlan.id
     httpsOnly: true
     siteConfig: {
-      nodeVersion: '~20'
+      nodeVersion: '~22'
       ftpsState: 'Disabled'
       minTlsVersion: '1.2'
       appSettings: [
@@ -71,7 +71,7 @@ resource functionApp 'Microsoft.Web/sites@2022-09-01' = {
         { name: 'WEBSITE_CONTENTSHARE',                     value: toLower(baseName) }
         { name: 'FUNCTIONS_EXTENSION_VERSION',              value: '~4' }
         { name: 'FUNCTIONS_WORKER_RUNTIME',                 value: 'node' }
-        { name: 'WEBSITE_NODE_DEFAULT_VERSION',             value: '~20' }
+        { name: 'WEBSITE_NODE_DEFAULT_VERSION',             value: '~22' }
         { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING',    value: appInsights.properties.ConnectionString }
         { name: 'WEBSITE_RUN_FROM_PACKAGE',                 value: '1' }
       ]
