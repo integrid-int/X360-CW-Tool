@@ -664,11 +664,6 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
   }
 
   try {
-    if (path.includes('/_shim/assignment/') && method === 'GET' && haloClient) {
-      const ticketId = Number(path.match(/\/_shim\/assignment\/(\d+)/)?.[1]);
-      if (!Number.isFinite(ticketId)) return { status: 400, headers: h, jsonBody: { error: 'Ticket id is required.' } };
-      return { status: 200, headers: h, jsonBody: await haloClient.inspectAssignment(ticketId) };
-    }
     if (path.includes('/system/info'))            return { status: 200, headers: h, jsonBody: MOCK_SYSTEM_INFO };
     if (path.includes('/system/members/me'))      return { status: 200, headers: h, jsonBody: createMember(authIdentifier) };
     if (path.match(/\/system\/members\/count$/) && method === 'GET')
