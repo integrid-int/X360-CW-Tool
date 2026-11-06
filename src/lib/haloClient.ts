@@ -171,6 +171,24 @@ export class HaloClient {
     return extractListPayload(payload, ['teams', 'team']);
   }
 
+  async getTicketType(ticketTypeId: number): Promise<HaloRecord> {
+    const payload = await this.request(`/TicketType/${ticketTypeId}?includedetails=true`, { method: 'GET' });
+    return asObject(payload) ?? {};
+  }
+
+  async getIncidentTicketType(): Promise<HaloRecord | null> {
+    const types = await this.listTicketTypes();
+    const incident = types.find((ticketType) => {
+      const name = readRecordString(ticketType, ['name', 'tickettypename']);
+      return name?.toLowerCase() === 'incident';
+    });
+    if (!incident) return null;
+    const id = Number(readRecordString(incident, ['id', 'tickettype_id']));
+    if (!Number.isFinite(id)) return null;
+    if (Array.isArray(incident.allowed_category1) || Array.isArray(incident.allowed_category2)) return incident;
+    return this.getTicketType(id);
+  }
+
   async listTicketTypes(clientId?: number): Promise<HaloRecord[]> {
     const query = new URLSearchParams({
       showall: 'true',

@@ -1,5 +1,7 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
 import { createHaloClientFromEnv } from '../lib/haloClient';
+import { AXCIENT_HALO_COMPANY_MAP } from '../lib/axcientCompanyMap';
+import { buildHaloTicketCreateRequest, categoriesFromTicketType, resolveHaloClientId } from '../lib/haloTicketPayload';
 
 // ── Mock CW responses ─────────────────────────────────────────────────────────
 
@@ -481,55 +483,6 @@ function filterBoards(conditions: string, sourceBoards: Record<string, unknown>[
   return boards;
 }
 
-function normalizeName(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, '');
-}
-
-function resolveHaloCompanyId(companyIdentifier: string | null, companies: Record<string, unknown>[]): number | null {
-  if (!companyIdentifier) return null;
-  const raw = companyIdentifier.trim();
-  if (raw.length === 0) return null;
-  const lower = raw.toLowerCase();
-
-  const directMatch = companies.find((company) => {
-    return String(company.identifier ?? '').toLowerCase() === lower
-      || String(company.name ?? '').toLowerCase() === lower
-      || String(company.id ?? '') === raw;
-  });
-  if (directMatch) return getValueNumber(directMatch, 'id');
-
-  const staticCustomer = CUSTOMER_COMPANIES.find((customer) => {
-    return customer.identifier.toLowerCase() === lower
-      || String(customer.id) === raw
-      || customer.name.toLowerCase() === lower;
-  });
-  if (staticCustomer) {
-    const targetName = normalizeName(staticCustomer.name);
-    const haloByName = companies.find((company) => {
-      const haloName = typeof company.name === 'string' ? company.name : '';
-      return normalizeName(haloName) === targetName;
-    });
-    if (haloByName) return getValueNumber(haloByName, 'id');
-  }
-
-  const mapCandidates = [
-    lower,
-    staticCustomer?.identifier.toLowerCase() ?? '',
-    staticCustomer?.name.toLowerCase() ?? ''
-  ].filter((candidate) => candidate.length > 0);
-  for (const candidate of mapCandidates) {
-    const mappedId = HALO_COMPANY_MAP[candidate];
-    if (!Number.isFinite(mappedId)) continue;
-    const mappedCompany = companies.find((company) => getValueNumber(company, 'id') === mappedId);
-    if (mappedCompany) return mappedId;
-    return mappedId;
-  }
-
-  const asNumber = Number(raw);
-  if (Number.isFinite(asNumber)) return asNumber;
-  return null;
-}
-
 function findGeneralContact(contacts: Record<string, unknown>[]): Record<string, unknown> | null {
   for (const contact of contacts) {
     const name = getValueString(contact, 'name')?.toLowerCase() ?? '';
@@ -797,140 +750,66 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
           return { status: 200, headers: h, jsonBody: closedResponse };
         }
 
-        const [companies, boards, types, priorities] = await Promise.all([
+        const [companies, boards, types, priorities, incidentType] = await Promise.all([
           getHaloCompanies(context),
           getHaloBoards(context),
           getHaloTypes(context),
-          getHaloPriorities(context)
+          getHaloPriorities(context),
+          haloClient.getIncidentTicketType()
         ]);
-
+        const categories = incidentType ? categoriesFromTicketType(incidentType) : [];
         const companyIdentifier = getNestedString(parsed, 'company', 'identifier')
           ?? getNestedString(parsed, 'company', 'id')
           ?? getNestedString(parsed, 'company', 'name');
-        const boardName = getNestedString(parsed, 'board', 'name') ?? 'Service Desk';
-        const typeName = getNestedString(parsed, 'type', 'name') ?? 'Incident';
-        const priorityName = getNestedString(parsed, 'priority', 'name');
-        const categoryLevel1 =
-          getNestedString(parsed, 'category', 'level1')
-          ?? getNestedString(parsed, 'category', 'name')
-          ?? getValueString(parsed, 'category1')
-          ?? 'Incident';
-        const categoryLevel2 =
-          getNestedString(parsed, 'category', 'level2')
-          ?? getNestedString(parsed, 'subCategory', 'name')
-          ?? getValueString(parsed, 'category2')
-          ?? 'Backup';
-        const contactId = getNestedNumber(parsed, 'contact', 'id');
-        const summary = typeof parsed.summary === 'string' && parsed.summary.trim().length > 0
-          ? parsed.summary
-          : 'Shim ticket';
-        const initialDescription = typeof parsed.initialDescription === 'string' ? parsed.initialDescription : '';
-        const resolvedCompanyId = resolveHaloCompanyId(companyIdentifier, companies);
-        const resolvedBoard = boards.find((board) => String(board.name).toLowerCase() === boardName.toLowerCase());
-        const resolvedType = types.find((type) => String(type.name).toLowerCase() === typeName.toLowerCase());
-        const resolvedPriority = priorities.find((priority) => {
-          if (!priorityName) return false;
-          return String(priority.name).toLowerCase() === priorityName.toLowerCase();
+        const companyMap = { ...AXCIENT_HALO_COMPANY_MAP, ...HALO_COMPANY_MAP };
+        const resolvedCompanyId = resolveHaloClientId({
+          companyIdentifier,
+          companies,
+          customerCompanies: CUSTOMER_COMPANIES,
+          companyMap
         });
-        const resolvedCompanyIdForContacts =
-          resolvedCompanyId !== null && Number.isFinite(resolvedCompanyId) ? resolvedCompanyId : undefined;
         const contactsForCompany = await getHaloContacts(
           context,
-          resolvedCompanyIdForContacts
+          resolvedCompanyId !== null ? resolvedCompanyId : undefined
         );
-        const companyGeneralContact = findGeneralContact(contactsForCompany);
-        let resolvedContactId: number | null = null;
-        if (contactId !== null) {
-          const exactContact = contactsForCompany.find((contact) => contact.id === contactId);
-          if (exactContact) {
-            resolvedContactId = contactId;
-          } else {
-            const fallbackContact = companyGeneralContact ?? contactsForCompany[0];
-            if (fallbackContact) {
-              const fallbackContactId = getValueNumber(fallbackContact, 'id');
-              if (fallbackContactId !== null) resolvedContactId = fallbackContactId;
+        const built = buildHaloTicketCreateRequest({
+          summary: typeof parsed.summary === 'string' && parsed.summary.trim().length > 0 ? parsed.summary : 'Shim ticket',
+          details: typeof parsed.initialDescription === 'string' ? parsed.initialDescription : '',
+          companyIdentifier,
+          companies,
+          customerCompanies: CUSTOMER_COMPANIES,
+          companyMap,
+          boards,
+          boardId: getNestedNumber(parsed, 'board', 'id'),
+          boardName: getNestedString(parsed, 'board', 'name'),
+          types,
+          typeId: getNestedNumber(parsed, 'type', 'id'),
+          typeName: getNestedString(parsed, 'type', 'name'),
+          priorities,
+          priorityName: getNestedString(parsed, 'priority', 'name'),
+          contacts: contactsForCompany,
+          contactId: getNestedNumber(parsed, 'contact', 'id'),
+          categories,
+          categoryLevel1: 'Incident',
+          categoryLevel2: 'Backup'
+        });
+        if (!built.ok) {
+          context.error('HALO_CATEGORY_UNRESOLVED', built.error);
+          return {
+            status: 502,
+            headers: h,
+            jsonBody: {
+              error: 'Halo ticket category could not be resolved.',
+              detail: built.error
             }
-          }
-        } else {
-          const fallbackContact = companyGeneralContact ?? contactsForCompany[0];
-          if (fallbackContact) {
-            const fallbackContactId = getValueNumber(fallbackContact, 'id');
-            if (fallbackContactId !== null) resolvedContactId = fallbackContactId;
-          }
+          };
         }
 
-        const haloCreatePayload: Record<string, unknown> = {
-          summary,
-          details: initialDescription,
-          category_1: categoryLevel1,
-          category_2: categoryLevel2,
-          // Halo requires non-zero impact/urgency when no ticket type auto-derives them.
-          // 0 is treated as "unset" and fails validation; 1 is the minimum accepted value.
-          impact: 1,
-          urgency: 1
-        };
-        if (resolvedCompanyId !== null && Number.isFinite(resolvedCompanyId)) haloCreatePayload.client_id = resolvedCompanyId;
-        if (resolvedBoard?.id) haloCreatePayload.team_id = resolvedBoard.id;
-        if (resolvedType?.id) haloCreatePayload.tickettype_id = resolvedType.id;
-        if (resolvedPriority?.id) haloCreatePayload.priority_id = resolvedPriority.id;
-        if (resolvedContactId !== null) haloCreatePayload.user_id = resolvedContactId;
-
-        let createdTicket: Record<string, unknown>;
-        try {
-          createdTicket = await haloClient.createTicket(haloCreatePayload);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          const categoryRejected = message.toLowerCase().includes('invalid resolution category value');
-          if (!categoryRejected) throw error;
-
-          const fallbackPayload = { ...haloCreatePayload };
-          const categories = await haloClient.listTicketCategories();
-          const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '');
-          const wantedLevel1 = normalize(categoryLevel1);
-          const wantedLevel2 = normalize(categoryLevel2);
-          const level1 = categories.find((category) => normalize(category.name) === wantedLevel1);
-          let level2 = categories.find((category) => normalize(category.name) === wantedLevel2);
-          if (level1) {
-            const childMatch = categories.find((category) => category.parentId === level1.id && normalize(category.name) === wantedLevel2);
-            if (childMatch) level2 = childMatch;
-          }
-
-          if (level1 || level2) {
-            if (level1) fallbackPayload.category_1 = level1.id;
-            if (level2) fallbackPayload.category_2 = level2.id;
-            context.warn(
-              'HALO_CATEGORY_REJECTED retrying ticket create with discovered category ids',
-              JSON.stringify({
-                requested: { category_1: categoryLevel1, category_2: categoryLevel2 },
-                resolved: { category_1: level1?.id ?? null, category_2: level2?.id ?? null },
-                categorySample: categories.slice(0, 25)
-              })
-            );
-            try {
-              createdTicket = await haloClient.createTicket(fallbackPayload);
-            } catch {
-              delete fallbackPayload.category_1;
-              delete fallbackPayload.category_2;
-              context.warn(
-                'HALO_CATEGORY_RETRY_WITH_IDS_FAILED retrying ticket create without category fields',
-                JSON.stringify({ category_1: categoryLevel1, category_2: categoryLevel2 })
-              );
-              createdTicket = await haloClient.createTicket(fallbackPayload);
-            }
-          } else {
-            delete fallbackPayload.category_1;
-            delete fallbackPayload.category_2;
-            context.warn(
-              'HALO_CATEGORY_REJECTED no category ids discovered, retrying ticket create without category fields',
-              JSON.stringify({ category_1: categoryLevel1, category_2: categoryLevel2 })
-            );
-            createdTicket = await haloClient.createTicket(fallbackPayload);
-          }
-        }
+        const createdTicket = await haloClient.createTicket(built.payload);
         const mappedTicket = mapHaloTicketToConnectWise(createdTicket, effectiveIdentifier);
         const mappedTicketId = extractTicketId(mappedTicket.id) ?? Math.floor(Math.random() * 90000) + 10000;
         CREATED_TICKETS.set(mappedTicketId, mappedTicket);
-        context.log(`TICKET_CREATE halo_id=${mappedTicketId}`, JSON.stringify(haloCreatePayload));
+        context.log(`TICKET_CREATE halo_id=${mappedTicketId}`, JSON.stringify(built.payload));
         return {
           status: 201,
           headers: h,
