@@ -344,7 +344,10 @@ export class HaloClient {
         '/Rule?count=100&pageinate=false',
         '/Automation?count=50&pageinate=false',
         '/Workflow?count=20&pageinate=false',
-        `/Agent?team_id=${Number.isFinite(teamId) ? teamId : 1}&includeenabledonly=true&count=100`
+        `/Agent?team_id=${Number.isFinite(teamId) ? teamId : 1}&includeenabledonly=true&count=100`,
+        '/Agent?count=100&includeintelligent=true&includeunassigned=true',
+        '/Agent?search=Load%20Balance&count=20',
+        '/Agent?search=Round%20Robin&count=20'
       ].map((path) => probe(path)))
     ]);
 
@@ -374,8 +377,13 @@ export class HaloClient {
     })) : [];
     const rules = await Promise.all([1, 13, 17].map(async (ruleId) => {
       try {
-        const payload = asObject(await this.request(`/TicketRules/${ruleId}`, { method: 'GET' })) ?? {};
-        return { id: ruleId, ...outline(payload), children: nested(payload.outcomes ?? payload.actions ?? payload.criteria ?? payload.rules) };
+        const payload = asObject(await this.request(`/TicketRules/${ruleId}?includedetails=true`, { method: 'GET' })) ?? {};
+        return {
+          id: ruleId,
+          ...outline(payload),
+          criteria: nested(payload.criteria),
+          outcomes: nested(payload.outcomes)
+        };
       } catch (error) {
         return { id: ruleId, error: error instanceof Error ? error.message.slice(0, 220) : 'rule lookup failed' };
       }
@@ -383,7 +391,10 @@ export class HaloClient {
     let actions: Array<Record<string, unknown>> = [];
     try {
       const actionPayload = await this.request(`/Actions?ticket_id=${ticketId}&count=20&includehtml=false`, { method: 'GET' });
-      actions = extractListPayload(actionPayload, ['actions', 'action', 'results']).slice(0, 12).map((row) => outline(row));
+      actions = extractListPayload(actionPayload, ['actions', 'action', 'results']).slice(0, 12).map((row) => ({
+        ...outline(row),
+        note: typeof row.note === 'string' ? row.note.slice(0, 2000) : null
+      }));
     } catch (error) {
       actions = [{ error: error instanceof Error ? error.message.slice(0, 180) : 'action lookup failed' }];
     }
