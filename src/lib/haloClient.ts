@@ -344,7 +344,7 @@ export class HaloClient {
         for (const [key, value] of Object.entries(row)) {
           if (!/who|agent|outcome|note|actiondate|datetime|status|assign|hidden|description/i.test(key)) continue;
           if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || value === null) {
-            summary[key] = typeof value === 'string' ? value.slice(0, 240) : value;
+            summary[key] = typeof value === 'string' ? value.slice(0, 2000) : value;
           }
         }
         return summary;
