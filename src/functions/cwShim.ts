@@ -808,8 +808,18 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
           ?? getNestedString(parsed, 'company', 'id')
           ?? getNestedString(parsed, 'company', 'name');
         const boardName = getNestedString(parsed, 'board', 'name') ?? 'Service Desk';
-        const typeName = getNestedString(parsed, 'type', 'name') ?? 'General';
+        const typeName = getNestedString(parsed, 'type', 'name') ?? 'Incident';
         const priorityName = getNestedString(parsed, 'priority', 'name');
+        const categoryLevel1 =
+          getNestedString(parsed, 'category', 'level1')
+          ?? getNestedString(parsed, 'category', 'name')
+          ?? getValueString(parsed, 'category1')
+          ?? 'Incident';
+        const categoryLevel2 =
+          getNestedString(parsed, 'category', 'level2')
+          ?? getNestedString(parsed, 'subCategory', 'name')
+          ?? getValueString(parsed, 'category2')
+          ?? 'Backup';
         const contactId = getNestedNumber(parsed, 'contact', 'id');
         const summary = typeof parsed.summary === 'string' && parsed.summary.trim().length > 0
           ? parsed.summary
@@ -852,6 +862,10 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
         const haloCreatePayload: Record<string, unknown> = {
           summary,
           details: initialDescription,
+          category_1: categoryLevel1,
+          category_2: categoryLevel2,
+          category1: categoryLevel1,
+          category2: categoryLevel2,
           // Halo requires non-zero impact/urgency when no ticket type auto-derives them.
           // 0 is treated as "unset" and fails validation; 1 is the minimum accepted value.
           impact: 1,
