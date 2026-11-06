@@ -875,7 +875,23 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
         if (resolvedPriority?.id) haloCreatePayload.priority_id = resolvedPriority.id;
         if (resolvedContactId !== null) haloCreatePayload.user_id = resolvedContactId;
 
-        const createdTicket = await haloClient.createTicket(haloCreatePayload);
+        let createdTicket: Record<string, unknown>;
+        try {
+          createdTicket = await haloClient.createTicket(haloCreatePayload);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          const categoryRejected = message.toLowerCase().includes('invalid resolution category value');
+          if (!categoryRejected) throw error;
+
+          const fallbackPayload = { ...haloCreatePayload };
+          delete fallbackPayload.category_1;
+          delete fallbackPayload.category_2;
+          context.warn(
+            'HALO_CATEGORY_REJECTED retrying ticket create without category fields',
+            JSON.stringify({ category_1: categoryLevel1, category_2: categoryLevel2 })
+          );
+          createdTicket = await haloClient.createTicket(fallbackPayload);
+        }
         const mappedTicket = mapHaloTicketToConnectWise(createdTicket, effectiveIdentifier);
         const mappedTicketId = extractTicketId(mappedTicket.id) ?? Math.floor(Math.random() * 90000) + 10000;
         CREATED_TICKETS.set(mappedTicketId, mappedTicket);
