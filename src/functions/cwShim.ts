@@ -864,8 +864,6 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
           details: initialDescription,
           category_1: categoryLevel1,
           category_2: categoryLevel2,
-          category1: categoryLevel1,
-          category2: categoryLevel2,
           // Halo requires non-zero impact/urgency when no ticket type auto-derives them.
           // 0 is treated as "unset" and fails validation; 1 is the minimum accepted value.
           impact: 1,
