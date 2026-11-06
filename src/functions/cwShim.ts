@@ -833,8 +833,8 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
           boardId: getNestedNumber(parsed, 'board', 'id'),
           boardName: getNestedString(parsed, 'board', 'name'),
           types,
-          typeId: getNestedNumber(parsed, 'type', 'id'),
-          typeName: getNestedString(parsed, 'type', 'name'),
+          typeId: incidentType ? getValueNumber(incidentType, 'id', 'tickettype_id') : getNestedNumber(parsed, 'type', 'id'),
+          typeName: incidentType ? 'Incident' : getNestedString(parsed, 'type', 'name'),
           priorities,
           priorityName: getNestedString(parsed, 'priority', 'name'),
           contacts: contactsForCompany,
@@ -853,11 +853,7 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
               error: 'Halo ticket category could not be resolved.',
               detail: built.error,
               categoryDefaults: readCategoryDefaults(incidentType),
-              categoryProbes: categoryCatalog.attempts,
-              categoryNames: (categoryCatalog.categories.some((category) => /inc|back|bck|resol/i.test(category.name))
-                ? categoryCatalog.categories.filter((category) => /inc|back|bck|resol/i.test(category.name))
-                : categoryCatalog.categories.slice(0, 60))
-                .map((category) => ({ id: category.id, name: category.name, parentId: category.parentId }))
+              categoryProbes: categoryCatalog.attempts
             }
           };
         }

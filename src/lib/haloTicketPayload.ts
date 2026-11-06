@@ -163,21 +163,31 @@ function resolveCategoryIds(input: HaloTicketBuildInput): { category1: string; c
     if (normalizeName(category.name) !== wantedLevel1) return false;
     return category.level === 1 || category.parentId === null || category.parentId === '' || category.parentId === '0';
   }) ?? input.categories.find((category) => normalizeName(category.name) === wantedLevel1);
-  if (!level1) return null;
 
   const sameType = (category: HaloCategoryRef) => {
-    if (level1.ticketTypeId === undefined || category.ticketTypeId === undefined) return true;
+    if (!level1 || level1.ticketTypeId === undefined || category.ticketTypeId === undefined) return true;
     return category.ticketTypeId === level1.ticketTypeId;
   };
   const namedChildren = input.categories.filter((category) => normalizeName(category.name) === wantedLevel2 && sameType(category));
-  const level2 = namedChildren.find((category) => category.parentId === level1.id)
+  const level2 = namedChildren.find((category) => level1 && category.parentId === level1.id)
     ?? namedChildren.find((category) => category.level === 2)
     ?? namedChildren[0];
-  if (!level2) return null;
+  if (level1 && level2) {
+    return {
+      category1: level1.id,
+      category2: level2.id,
+      ticketTypeId: level1.ticketTypeId ?? null
+    };
+  }
+
+  // This Halo tenant stores the full path as the category value, for example "Incident>Backup".
+  const wantedPath = normalizeName(`${input.categoryLevel1}>${input.categoryLevel2}`);
+  const pathMatch = input.categories.find((category) => normalizeName(category.name) === wantedPath);
+  if (!pathMatch) return null;
   return {
-    category1: level1.id,
-    category2: level2.id,
-    ticketTypeId: level1.ticketTypeId ?? null
+    category1: level1?.name ?? input.categoryLevel1,
+    category2: pathMatch.name,
+    ticketTypeId: level1?.ticketTypeId ?? pathMatch.ticketTypeId ?? null
   };
 }
 
