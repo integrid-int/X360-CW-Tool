@@ -858,7 +858,21 @@ export async function cwShim(req: HttpRequest, context: InvocationContext): Prom
           };
         }
 
-        const createdTicket = await haloClient.createTicket(built.payload);
+        let createdTicket: Record<string, unknown>;
+        try {
+          createdTicket = await haloClient.createTicket(built.payload);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (!message.toLowerCase().includes('invalid resolution category value')) throw error;
+          const pathCategory = categoryCatalog.categories.find((category) => {
+            return category.name.toLowerCase().replace(/[^a-z0-9]+/g, '') === 'incidentbackup';
+          });
+          const retryPayload = { ...built.payload };
+          delete retryPayload.category_2;
+          if (pathCategory) retryPayload.category_1 = pathCategory.id;
+          context.warn('HALO_CATEGORY_RETRY', JSON.stringify({ category_1: retryPayload.category_1 }));
+          createdTicket = await haloClient.createTicket(retryPayload);
+        }
         const mappedTicket = mapHaloTicketToConnectWise(createdTicket, effectiveIdentifier);
         const mappedTicketId = extractTicketId(mappedTicket.id) ?? Math.floor(Math.random() * 90000) + 10000;
         CREATED_TICKETS.set(mappedTicketId, mappedTicket);

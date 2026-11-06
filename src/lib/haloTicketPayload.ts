@@ -185,8 +185,8 @@ function resolveCategoryIds(input: HaloTicketBuildInput): { category1: string; c
   const pathMatch = input.categories.find((category) => normalizeName(category.name) === wantedPath);
   if (!pathMatch) return null;
   return {
-    category1: level1?.name ?? input.categoryLevel1,
-    category2: pathMatch.name,
+    category1: pathMatch.name,
+    category2: '',
     ticketTypeId: level1?.ticketTypeId ?? pathMatch.ticketTypeId ?? null
   };
 }
@@ -220,10 +220,10 @@ export function buildHaloTicketCreateRequest(input: HaloTicketBuildInput): HaloT
     summary: input.summary,
     details: input.details,
     category_1: categories.category1,
-    category_2: categories.category2,
     impact: 1,
     urgency: 1
   };
+  if (categories.category2) payload.category_2 = categories.category2;
 
   const companyId = resolveHaloClientId(input);
   if (companyId !== null) payload.client_id = companyId;

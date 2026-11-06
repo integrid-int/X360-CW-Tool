@@ -192,8 +192,8 @@ test('full path category value Incident>Backup is sent as the ticket category', 
   assert.equal(result.payload.client_id, 70);
   assert.equal(result.payload.site_id, 88);
   assert.equal(result.payload.tickettype_id, 1);
-  assert.equal(result.payload.category_1, 'Incident');
-  assert.equal(result.payload.category_2, 'Incident>Backup');
+  assert.equal(result.payload.category_1, 'Incident>Backup');
+  assert.equal(result.payload.category_2, undefined);
 });
 
 test('catalog category_name rows resolve incident parent and backup child', () => {
